@@ -1,0 +1,41 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: mooar-market
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/mooar-market?cachePrepStmts=true&useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
+    username: root
+    password: your-db-password
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+market:
+  jwt:
+    enable: false
+    publicKey: "your-jwt-public-key"
+  chain:
+    rpc: "https://lb5.stepn.com"
+    chainId: 137
+    masterAddress: "0x0000000000000000000000000000000000000000"
+    encryptKey: "your-aes-encrypt-key-base64"
+    gmtContract: "0x714DB550b574b3E927af3D93E26127D15721D4C2"
+    boxContract: "0x74796fd8c0ef5c17340f38f5ff672580d3e57f2d"
+    badgeContract: "0x462DD5C6A786aCB47c60ad419FeaB11054B0b249"
+    MORCHIContract: "0xB48f53010Acbc0E24D3D12D892E2215879e6fD13"
+    boxTokenId: 1
+    gasLimit: 100000
+  item:
+    imagePrefix: "http://mooar-market/"
+  scan:
+    startBlock: 0
+    confirmBlocks: 12
+  admin:
+    token: "your-admin-token"
+  fee:
+    withdrawFee: 100
+    tradeFeeRate: 6
