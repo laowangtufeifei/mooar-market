@@ -20,8 +20,8 @@ public interface NftMapper {
     @Select("SELECT * FROM nft WHERE owner_id = #{ownerId} AND state = 0")
     List<Nft> selectByOwner(@Param("ownerId") Long ownerId);
 
-    @Insert("INSERT INTO nft (item_id, contract, token_id, owner_id, state, order_id, metadata, created_at, updated_at) " +
-            "VALUES (#{itemId}, #{contract}, #{tokenId}, #{ownerId}, #{state}, #{orderId}, #{metadata}, #{createdAt}, #{updatedAt})")
+    @Insert("INSERT INTO nft (item_id, contract, token_id, owner_id, state, order_id, image, metadata, created_at, updated_at) " +
+            "VALUES (#{itemId}, #{contract}, #{tokenId}, #{ownerId}, #{state}, #{orderId}, #{image},#{metadata}, #{createdAt}, #{updatedAt})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(Nft nft);
 

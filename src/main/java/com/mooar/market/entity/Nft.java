@@ -11,6 +11,7 @@ public class Nft {
     private Long ownerId;
     private Integer state;
     private Long orderId;
+    private String image;
     private String metadata;
     private Long createdAt;
     private Long updatedAt;

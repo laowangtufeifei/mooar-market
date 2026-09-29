@@ -226,6 +226,7 @@ public class MarketService {
                 vo.setOrderId(o.getId());
                 vo.setNftId(nft.getId());
                 vo.setTokenId(nft.getTokenId());
+                vo.setImage(nft.getImage());
                 vo.setMetadata(nft.getMetadata());
                 vo.setPrice(o.getPrice());
                 list.add(vo);
