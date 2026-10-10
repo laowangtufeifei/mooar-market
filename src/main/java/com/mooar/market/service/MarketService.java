@@ -4,6 +4,7 @@ import com.mooar.market.common.ItemType;
 
 import com.mooar.market.common.BizException;
 import com.mooar.market.common.ErrorCode;
+import com.mooar.market.common.TraitDef;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.dto.CollectionVO;
 import com.mooar.market.dto.NftOrderVO;
@@ -25,7 +26,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +44,7 @@ public class MarketService {
     private final NftMapper nftMapper;
     private final BalanceLogMapper balanceLogMapper;
     private final MarketProperties properties;
+    private final ItemTraitService itemTraitService;
 
     /**
      * 挂单：冻结资产并生成卖单
@@ -192,6 +197,55 @@ public class MarketService {
     }
 
     /**
+     * collection 的筛选条件定义（槽位 + 属性名 + 值编码），供前端渲染筛选菜单
+     */
+    public List<Map<String, Object>> listTraitDefs(Long itemId) {
+        Item item = itemCache.getById(itemId);
+        if (item == null) {
+            throw new BizException(ErrorCode.ITEM_NOT_FOUND);
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (TraitDef def : itemTraitService.getTraitDefs(itemId).values()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", def.getName());
+            m.put("type", def.getType());
+            if ("number".equals(def.getType())) {
+                m.put("min", def.getMin());
+                m.put("max", def.getMax());
+            } else {
+                List<Map<String, Object>> values = new ArrayList<>();
+                if (def.getValues() != null) {
+                    def.getValues().forEach((k, v) -> {
+                        Map<String, Object> vm = new LinkedHashMap<>();
+                        vm.put("value", k);
+                        vm.put("code", v);
+                        values.add(vm);
+                    });
+                }
+                m.put("values", values);
+            }
+            result.add(m);
+        }
+        return result;
+    }
+
+    /**
+     * 按 trait 条件搜索 nft，filters 形如 "Rarity:Legendary,Level:10-30"
+     */
+    public List<Nft> searchNfts(Long itemId, String filters, int page, int pageSize) {
+        Item item = itemCache.getById(itemId);
+        if (item == null) {
+            throw new BizException(ErrorCode.ITEM_NOT_FOUND);
+        }
+        Map<String, Object> params = new HashMap<>();
+        params.put("itemId", itemId);
+        params.put("conds", itemTraitService.translateFilters(itemId, filters));
+        params.put("offset", Math.max(0, (page - 1) * pageSize));
+        params.put("limit", pageSize);
+        return nftMapper.searchByTraits(params);
+    }
+
+    /**
      * collection 列表：可交易道具（box/badge）的聚合信息
      */
     public List<CollectionVO> listCollections() {
@@ -207,33 +261,58 @@ public class MarketService {
     }
 
     /**
-     * collection 详情：1155 返回聚合，721 返回 NFT 挂单列表
+     * 兼容 itemId 与合约地址两种入参，统一解析成 itemId
      */
-    public Object collectionDetail(Long itemId) {
+    public Long resolveItemId(String key) {
+        if (key == null || key.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        String k = key.trim();
+        Item item;
+        if (k.length() == 42 && (k.startsWith("0x") || k.startsWith("0X"))) {
+            item = itemCache.getByContract(k.toLowerCase());
+        } else if (k.length() == 40 && k.matches("(?i)[0-9a-f]{40}")) {
+            item = itemCache.getByContract("0x" + k.toLowerCase());
+        } else if (k.matches("\\d+")) {
+            item = itemCache.getById(Long.parseLong(k));
+        } else {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        if (item == null) {
+            throw new BizException(ErrorCode.ITEM_NOT_FOUND);
+        }
+        return item.getId();
+    }
+
+    /**
+     * collection 详情：统一以列表返回，1155 返回单元素聚合，721 返回 NFT 挂单列表
+     */
+    public List<Object> collectionDetail(Long itemId) {
         Item item = itemCache.getById(itemId);
         if (item == null) {
             throw new BizException(ErrorCode.ITEM_NOT_FOUND);
         }
-        if (item.getType() == ItemType.ERC721) {
-            List<Order> orders = orderMapper.selectActiveByItem(itemId);
-            List<NftOrderVO> list = new ArrayList<>();
-            for (Order o : orders) {
-                Nft nft = nftMapper.selectById(o.getNftId());
-                if (nft == null) {
-                    continue;
-                }
-                NftOrderVO vo = new NftOrderVO();
-                vo.setOrderId(o.getId());
-                vo.setNftId(nft.getId());
-                vo.setTokenId(nft.getTokenId());
-                vo.setImage(nft.getImage());
-                vo.setMetadata(nft.getMetadata());
-                vo.setPrice(o.getPrice());
-                list.add(vo);
-            }
+        List<Object> list = new ArrayList<>();
+        if (item.getType() != ItemType.ERC721) {
+            list.add(buildCollection(item));
             return list;
         }
-        return buildCollection(item);
+        List<Order> orders = orderMapper.selectActiveByItem(itemId);
+        for (Order o : orders) {
+            Nft nft = nftMapper.selectById(o.getNftId());
+            if (nft == null) {
+                continue;
+            }
+            NftOrderVO vo = new NftOrderVO();
+            vo.setOrderId(o.getId());
+            vo.setNftId(nft.getId());
+            vo.setTokenId(nft.getTokenId());
+            vo.setImage(nft.getImage());
+            vo.setMetadata(nft.getMetadata());
+            vo.setPrice(o.getPrice());
+            list.add(vo);
+        }
+        return list;
     }
 
     /**

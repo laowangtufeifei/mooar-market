@@ -1,18 +1,21 @@
 package com.mooar.market.service;
 
 import com.mooar.market.common.ItemType;
-
+import com.mooar.market.common.NftState;
 import com.mooar.market.dto.AssetVO;
+import com.mooar.market.dto.NftAssetVO;
 import com.mooar.market.entity.Item;
 import com.mooar.market.entity.Nft;
+import com.mooar.market.entity.Order;
 import com.mooar.market.entity.UserAsset;
 import com.mooar.market.mapper.NftMapper;
+import com.mooar.market.mapper.OrderMapper;
 import com.mooar.market.mapper.UserAssetMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -24,18 +27,20 @@ public class AssetService {
     private final ItemCache itemCache;
     private final UserAssetMapper userAssetMapper;
     private final NftMapper nftMapper;
+    private final OrderMapper orderMapper;
 
     /**
-     * 查询用户全部资产（同质化余额 + badge NFT）
+     * 查询用户全部资产（同质化余额 + NFT），NFT 按状态返回明细
      */
     public List<AssetVO> getAssets(Long userId) {
         List<Item> items = itemCache.getAll();
         Map<Long, UserAsset> assetMap = userAssetMapper.selectByUser(userId).stream()
                 .collect(Collectors.toMap(UserAsset::getItemId, a -> a, (x, y) -> x));
-        Map<Long, Item> itemMap = items.stream().collect(Collectors.toMap(Item::getId, i -> i));
+        Map<Long, List<Nft>> nftMap = nftMapper.selectByOwner(userId).stream()
+                .filter(n -> n.getItemId() != null)
+                .collect(Collectors.groupingBy(Nft::getItemId));
 
         List<AssetVO> result = new ArrayList<>();
-        List<Nft> nfts = null;
         for (Item item : items) {
             AssetVO vo = new AssetVO();
             vo.setItemId(item.getId());
@@ -43,19 +48,66 @@ public class AssetService {
             vo.setType(item.getType());
             vo.setImage(item.getImagePrefix() + item.getId());
             if (item.getType() == ItemType.ERC721) {
-                if (nfts == null) {
-                    nfts = nftMapper.selectByOwner(userId);
-                }
-                vo.setAvailable((long) nfts.size());
-                vo.setFrozen(0L);
-                vo.setNftIds(nfts.stream().map(Nft::getTokenId).collect(Collectors.toList()));
+                fillNft(vo, nftMap.getOrDefault(item.getId(), Collections.emptyList()));
             } else {
                 UserAsset a = assetMap.get(item.getId());
-                vo.setAvailable(a == null ? 0L : a.getAvailable());
-                vo.setFrozen(a == null ? 0L : a.getFrozen());
+                long available = a == null ? 0L : a.getAvailable();
+                long frozen = a == null ? 0L : a.getFrozen();
+                vo.setAvailable(available);
+                vo.setFrozen(frozen);
+                vo.setListing(frozen);
+                vo.setWithdrawing(0L);
             }
             result.add(vo);
         }
         return result;
+    }
+
+    private void fillNft(AssetVO vo, List<Nft> nfts) {
+        Map<Long, Order> orderMap = loadOrders(nfts);
+        long normal = 0;
+        long listing = 0;
+        long withdrawing = 0;
+        for (Nft nft : nfts) {
+            int state = nft.getState() == null ? NftState.NORMAL : nft.getState();
+            NftAssetVO n = new NftAssetVO();
+            n.setNftId(nft.getId());
+            n.setTokenId(nft.getTokenId());
+            n.setImage(nft.getImage());
+            n.setMetadata(nft.getMetadata());
+            n.setState(state);
+            Order order = nft.getOrderId() == null ? null : orderMap.get(nft.getOrderId());
+            if (order != null) {
+                n.setOrderId(order.getId());
+                n.setPrice(order.getPrice());
+            }
+            vo.getNftList().add(n);
+            if (state == NftState.LISTING) {
+                listing++;
+            } else if (state == NftState.WITHDRAWING) {
+                withdrawing++;
+            } else {
+                normal++;
+                vo.getNftIds().add(nft.getTokenId());
+            }
+        }
+        vo.setAvailable(normal);
+        vo.setListing(listing);
+        vo.setWithdrawing(withdrawing);
+        vo.setFrozen(listing + withdrawing);
+    }
+
+    private Map<Long, Order> loadOrders(List<Nft> nfts) {
+        List<Long> ids = new ArrayList<>();
+        for (Nft nft : nfts) {
+            if (nft.getOrderId() != null && nft.getOrderId() > 0) {
+                ids.add(nft.getOrderId());
+            }
+        }
+        if (ids.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return orderMapper.selectByIds(ids).stream()
+                .collect(Collectors.toMap(Order::getId, o -> o, (x, y) -> x));
     }
 }

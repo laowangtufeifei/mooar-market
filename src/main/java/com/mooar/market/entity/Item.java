@@ -11,6 +11,7 @@ public class Item {
     private Long tokenId;
     private Long chainScale;
     private String imagePrefix;
+    private String traitsJson;
     private Integer state;
     private Long createdAt;
     private Long updatedAt;

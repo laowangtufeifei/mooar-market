@@ -16,4 +16,7 @@ public interface ItemMapper {
 
     @Select("SELECT * FROM item WHERE contract = #{contract} AND token_id = #{tokenId} LIMIT 1")
     Item selectByContractAndTokenId(@Param("contract") String contract, @Param("tokenId") Long tokenId);
+
+    @Select("SELECT * FROM item WHERE contract = #{contract} LIMIT 1")
+    Item selectByContract(@Param("contract") String contract);
 }

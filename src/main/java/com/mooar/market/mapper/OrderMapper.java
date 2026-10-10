@@ -14,6 +14,10 @@ public interface OrderMapper {
     @Select("SELECT * FROM `order` WHERE id = #{id}")
     Order selectById(@Param("id") Long id);
 
+    @Select("<script>SELECT * FROM `order` WHERE id IN " +
+            "<foreach collection='ids' item='id' open='(' separator=',' close=')'>#{id}</foreach></script>")
+    List<Order> selectByIds(@Param("ids") List<Long> ids);
+
     @Select("SELECT * FROM `order` WHERE state = 0 AND item_id = #{itemId} " +
             "ORDER BY price ASC, id ASC LIMIT #{offset}, #{limit}")
     List<Order> selectActive(@Param("itemId") Long itemId, @Param("offset") int offset, @Param("limit") int limit);
@@ -23,6 +27,9 @@ public interface OrderMapper {
 
     @Select("SELECT * FROM `order` WHERE seller_id = #{sellerId} ORDER BY id DESC")
     List<Order> selectBySeller(@Param("sellerId") Long sellerId);
+
+    @Select("SELECT COUNT(*) FROM `order` WHERE nft_id = #{nftId} AND nft_id > 0 AND state = 0")
+    int countActiveByNft(@Param("nftId") Long nftId);
 
     @Insert("INSERT INTO `order` (seller_id, item_id, nft_id, amount, price, state, buyer_id, created_at, updated_at) " +
             "VALUES (#{sellerId}, #{itemId}, #{nftId}, #{amount}, #{price}, #{state}, #{buyerId}, #{createdAt}, #{updatedAt})")

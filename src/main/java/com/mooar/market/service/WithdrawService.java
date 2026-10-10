@@ -12,6 +12,7 @@ import com.mooar.market.entity.UserAsset;
 import com.mooar.market.entity.Withdraw;
 import com.mooar.market.mapper.BalanceLogMapper;
 import com.mooar.market.mapper.NftMapper;
+import com.mooar.market.mapper.OrderMapper;
 import com.mooar.market.mapper.UserAssetMapper;
 import com.mooar.market.mapper.WithdrawMapper;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ public class WithdrawService {
 
     private final ItemCache itemCache;
     private final NftMapper nftMapper;
+    private final OrderMapper orderMapper;
     private final UserAssetMapper userAssetMapper;
     private final WithdrawMapper withdrawMapper;
     private final BalanceLogMapper balanceLogMapper;
@@ -62,6 +64,9 @@ public class WithdrawService {
             Nft nft = nftMapper.selectById(nftId);
             if (nft == null || !nft.getOwnerId().equals(userId)) {
                 throw new BizException(ErrorCode.NFT_NOT_OWNER);
+            }
+            if (orderMapper.countActiveByNft(nftId) > 0) {
+                throw new BizException(ErrorCode.NFT_LOCKED);
             }
             if (nftMapper.lockForWithdraw(nftId, userId, now) == 0) {
                 throw new BizException(ErrorCode.NFT_LOCKED);

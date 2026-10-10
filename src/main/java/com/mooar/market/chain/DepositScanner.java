@@ -3,6 +3,7 @@ package com.mooar.market.chain;
 import com.mooar.market.common.ItemType;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mooar.market.common.AppShutdown;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.entity.BalanceLog;
 import com.mooar.market.entity.DepositLog;
@@ -17,6 +18,7 @@ import com.mooar.market.mapper.SysKvMapper;
 import com.mooar.market.mapper.UserAssetMapper;
 import com.mooar.market.mapper.UserMapper;
 import com.mooar.market.service.ItemCache;
+import com.mooar.market.service.ItemTraitService;
 import com.mooar.market.service.NftMetadataService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -60,6 +62,8 @@ public class DepositScanner {
     private final SysKvMapper sysKvMapper;
     private final ObjectMapper objectMapper;
     private final NftMetadataService nftMetadataService;
+    private final ItemTraitService itemTraitService;
+    private final AppShutdown appShutdown;
 
     private final Map<Long, Long> blockTimeCache = new HashMap<>();
 
@@ -78,9 +82,17 @@ public class DepositScanner {
                 long batchTo = Math.min(from + BATCH_SIZE - 1, confirmed);
                 scanRange(from, batchTo);
                 sysKvMapper.put(CURSOR_KEY, String.valueOf(batchTo));
+                if (appShutdown.isShuttingDown()) {
+                    log.info("扫块中断，服务正在关闭，游标保留在 {}，下次启动续扫", batchTo);
+                    return;
+                }
                 from = batchTo + 1;
             }
         } catch (Exception e) {
+            if (appShutdown.isShuttingDown() || Thread.currentThread().isInterrupted()) {
+                log.info("扫块中断，服务正在关闭，下次启动按游标续扫");
+                return;
+            }
             log.error("deposit scan error", e);
         }
     }
@@ -180,7 +192,8 @@ public class DepositScanner {
         if (item.getType() == ItemType.ERC721) {
             Nft exist = nftMapper.selectByContractAndTokenId(contract.toLowerCase(), value.longValue());
             long now = System.currentTimeMillis();
-            String metadata = nftMetadataService.fetchMetadata(contract, value.longValue());
+            boolean needMetadata = exist == null || exist.getMetadata() == null || exist.getMetadata().isBlank();
+            String metadata = needMetadata ? nftMetadataService.fetchMetadata(contract, value.longValue()) : null;
             if (exist == null) {
                 Nft nft = new Nft();
                 nft.setItemId(item.getId());
@@ -190,13 +203,25 @@ public class DepositScanner {
                 nft.setState(0);
                 nft.setOrderId(0L);
                 nft.setMetadata(metadata);
+                nft.setImage(nftMetadataService.parseImage(metadata));
+                itemTraitService.applyTraits(nft, item.getId(), metadata);
                 nft.setCreatedAt(now);
                 nft.setUpdatedAt(now);
                 nftMapper.insert(nft);
             } else {
-                nftMapper.updateOwner(exist.getId(), user.getId(), now);
+                if (nftMapper.updateOwnerOnDeposit(exist.getId(), user.getId(), now) == 0) {
+                    log.warn("NFT 处于挂单/提现中，跳过归属更新 user={} item={} tokenId={} tx={}",
+                            user.getId(), item.getId(), value, txHash);
+                }
                 if (metadata != null && !metadata.isBlank()) {
-                    nftMapper.updateMetadata(exist.getId(), metadata, now);
+                    Nft upd = new Nft();
+                    upd.setId(exist.getId());
+                    upd.setMetadata(metadata);
+                    upd.setImage(nftMetadataService.parseImage(metadata));
+                    itemTraitService.applyTraits(upd, item.getId(), metadata);
+                    upd.setUpdatedAt(now);
+                    nftMapper.updateTraits(upd);
+                    log.info("补全NFT属性 user={} item={} tokenId={} tx={}", user.getId(), item.getId(), value, txHash);
                 }
             }
             log.info("入账NFT user={} item={} tokenId={} tx={}", user.getId(), item.getId(), value, txHash);

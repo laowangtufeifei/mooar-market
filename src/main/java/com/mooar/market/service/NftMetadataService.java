@@ -81,4 +81,8 @@ public class NftMetadataService {
         }
         return null;
     }
+
+    public String parseImage(String metadata) {
+        return null;
+    }
 }

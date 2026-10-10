@@ -1,6 +1,7 @@
 package com.mooar.market.job;
 
 import com.mooar.market.chain.ChainTransferService;
+import com.mooar.market.common.AppShutdown;
 import com.mooar.market.entity.Item;
 import com.mooar.market.entity.Withdraw;
 import com.mooar.market.mapper.WithdrawMapper;
@@ -29,11 +30,14 @@ public class WithdrawRetryJob {
     private final ChainTransferService chainTransferService;
     private final ItemCache itemCache;
     private final Web3j web3j;
+    private final AppShutdown appShutdown;
 
     @Scheduled(fixedDelay = 10000)
     public void process() {
-        processPending();
-        processConfirming();
+        appShutdown.runQuietly(() -> {
+            processPending();
+            processConfirming();
+        });
     }
 
     private void processPending() {
@@ -47,6 +51,10 @@ public class WithdrawRetryJob {
                 withdrawLog.info("提现上链 id={} item={} to={} txHash={}",
                         w.getId(), w.getItemId(), w.getToAddr(), txHash);
             } catch (Exception e) {
+                if (appShutdown.isShuttingDown() || Thread.currentThread().isInterrupted()) {
+                    withdrawLog.info("提现上链中断，服务正在关闭 id={}", w.getId());
+                    return;
+                }
                 withdrawLog.error("提现上链失败 id={} err={}", w.getId(), e.getMessage());
                 fail(w, e.getMessage());
             }
@@ -73,6 +81,10 @@ public class WithdrawRetryJob {
                     fail(w, "receipt failed");
                 }
             } catch (Exception e) {
+                if (appShutdown.isShuttingDown() || Thread.currentThread().isInterrupted()) {
+                    withdrawLog.info("提现确认中断，服务正在关闭 id={}", w.getId());
+                    return;
+                }
                 withdrawLog.warn("提现确认异常 id={} err={}", w.getId(), e.getMessage());
             }
         }

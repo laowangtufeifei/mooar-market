@@ -17,12 +17,14 @@ public class ItemCache {
     private final ItemMapper itemMapper;
     private final Cache<Long, Item> byId;
     private final Cache<String, Item> byContractToken;
+    private final Cache<String, Item> byContract;
     private volatile List<Item> all;
 
     public ItemCache(ItemMapper itemMapper) {
         this.itemMapper = itemMapper;
         this.byId = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(10)).maximumSize(128).build();
         this.byContractToken = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(10)).maximumSize(128).build();
+        this.byContract = Caffeine.newBuilder().expireAfterWrite(Duration.ofMinutes(10)).maximumSize(128).build();
     }
 
     public List<Item> getAll() {
@@ -60,6 +62,22 @@ public class ItemCache {
         item = itemMapper.selectByContractAndTokenId(contract.toLowerCase(), tokenId);
         if (item != null) {
             byContractToken.put(key, item);
+        }
+        return item;
+    }
+
+    public Item getByContract(String contract) {
+        if (contract == null || contract.isBlank()) {
+            return null;
+        }
+        String key = contract.toLowerCase();
+        Item item = byContract.getIfPresent(key);
+        if (item != null) {
+            return item;
+        }
+        item = itemMapper.selectByContract(key);
+        if (item != null) {
+            byContract.put(key, item);
         }
         return item;
     }
