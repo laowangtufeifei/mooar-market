@@ -44,7 +44,8 @@ public class AppShutdown implements ApplicationListener<ContextClosedEvent> {
     }
 
     /**
-     * 定时任务入口：关闭开始后不再执行新任务，执行中的任务会被关闭流程等待
+     * 定时任务入口：正常运行期间照常执行（只是加一道闸门），
+     * 只有应用进入关闭流程后才跳过新任务，同时关闭流程会等待正在执行的任务结束
      */
     public void runQuietly(Runnable task) {
         if (shuttingDown) {

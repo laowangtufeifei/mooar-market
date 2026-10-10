@@ -46,18 +46,27 @@ public interface NftMapper {
                     @Param("toState") Integer toState, @Param("orderId") Long orderId,
                     @Param("updatedAt") Long updatedAt);
 
-    @Update("UPDATE nft SET owner_id = #{ownerId}, state = 0, order_id = 0, updated_at = #{updatedAt} WHERE id = #{id}")
-    int updateOwner(@Param("id") Long id, @Param("ownerId") Long ownerId, @Param("updatedAt") Long updatedAt);
+    @Update("UPDATE nft SET owner_id = #{ownerId}, state = #{state}, order_id = 0, updated_at = #{updatedAt} " +
+            "WHERE id = #{id}")
+    int updateOwner(@Param("id") Long id, @Param("ownerId") Long ownerId, @Param("state") Integer state,
+                    @Param("updatedAt") Long updatedAt);
 
-    @Update("UPDATE nft SET owner_id = #{ownerId}, updated_at = #{updatedAt} WHERE id = #{id} AND state = 0")
-    int updateOwnerOnDeposit(@Param("id") Long id, @Param("ownerId") Long ownerId, @Param("updatedAt") Long updatedAt);
+    @Update("UPDATE nft SET owner_id = #{ownerId}, state = #{state}, updated_at = #{updatedAt} " +
+            "WHERE id = #{id} AND state <> #{listingState} AND state <> #{withdrawingState}")
+    int updateOwnerOnDeposit(@Param("id") Long id, @Param("ownerId") Long ownerId, @Param("state") Integer state,
+                             @Param("listingState") Integer listingState,
+                             @Param("withdrawingState") Integer withdrawingState,
+                             @Param("updatedAt") Long updatedAt);
 
     @Update("UPDATE nft SET metadata = #{metadata}, updated_at = #{updatedAt} WHERE id = #{id}")
     int updateMetadata(@Param("id") Long id, @Param("metadata") String metadata, @Param("updatedAt") Long updatedAt);
 
-    @Update("UPDATE nft SET state = 2, updated_at = #{updatedAt} WHERE id = #{id} AND state = 0 AND owner_id = #{ownerId}")
-    int lockForWithdraw(@Param("id") Long id, @Param("ownerId") Long ownerId, @Param("updatedAt") Long updatedAt);
+    @Update("UPDATE nft SET state = #{toState}, updated_at = #{updatedAt} " +
+            "WHERE id = #{id} AND state = #{fromState} AND owner_id = #{ownerId}")
+    int lockForWithdraw(@Param("id") Long id, @Param("ownerId") Long ownerId,
+                        @Param("fromState") Integer fromState, @Param("toState") Integer toState,
+                        @Param("updatedAt") Long updatedAt);
 
-    @Update("UPDATE nft SET owner_id = 0, state = 0, updated_at = #{updatedAt} WHERE id = #{id}")
-    int release(@Param("id") Long id, @Param("updatedAt") Long updatedAt);
+    @Update("UPDATE nft SET owner_id = 0, state = #{state}, updated_at = #{updatedAt} WHERE id = #{id}")
+    int release(@Param("id") Long id, @Param("state") Integer state, @Param("updatedAt") Long updatedAt);
 }

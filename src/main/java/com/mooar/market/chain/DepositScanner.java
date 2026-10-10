@@ -4,6 +4,7 @@ import com.mooar.market.common.ItemType;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mooar.market.common.AppShutdown;
+import com.mooar.market.common.NftState;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.entity.BalanceLog;
 import com.mooar.market.entity.DepositLog;
@@ -18,8 +19,6 @@ import com.mooar.market.mapper.SysKvMapper;
 import com.mooar.market.mapper.UserAssetMapper;
 import com.mooar.market.mapper.UserMapper;
 import com.mooar.market.service.ItemCache;
-import com.mooar.market.service.ItemTraitService;
-import com.mooar.market.service.NftMetadataService;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,8 +60,6 @@ public class DepositScanner {
     private final BalanceLogMapper balanceLogMapper;
     private final SysKvMapper sysKvMapper;
     private final ObjectMapper objectMapper;
-    private final NftMetadataService nftMetadataService;
-    private final ItemTraitService itemTraitService;
     private final AppShutdown appShutdown;
 
     private final Map<Long, Long> blockTimeCache = new HashMap<>();
@@ -190,45 +187,37 @@ public class DepositScanner {
         }
         User user = getOrCreateUser(fromAddr);
         if (item.getType() == ItemType.ERC721) {
-            Nft exist = nftMapper.selectByContractAndTokenId(contract.toLowerCase(), value.longValue());
-            long now = System.currentTimeMillis();
-            boolean needMetadata = exist == null || exist.getMetadata() == null || exist.getMetadata().isBlank();
-            String metadata = needMetadata ? nftMetadataService.fetchMetadata(contract, value.longValue()) : null;
-            if (exist == null) {
-                Nft nft = new Nft();
-                nft.setItemId(item.getId());
-                nft.setContract(contract.toLowerCase());
-                nft.setTokenId(value.longValue());
-                nft.setOwnerId(user.getId());
-                nft.setState(0);
-                nft.setOrderId(0L);
-                nft.setMetadata(metadata);
-                nft.setImage(nftMetadataService.parseImage(metadata));
-                itemTraitService.applyTraits(nft, item.getId(), metadata);
-                nft.setCreatedAt(now);
-                nft.setUpdatedAt(now);
-                nftMapper.insert(nft);
-            } else {
-                if (nftMapper.updateOwnerOnDeposit(exist.getId(), user.getId(), now) == 0) {
-                    log.warn("NFT 处于挂单/提现中，跳过归属更新 user={} item={} tokenId={} tx={}",
-                            user.getId(), item.getId(), value, txHash);
-                }
-                if (metadata != null && !metadata.isBlank()) {
-                    Nft upd = new Nft();
-                    upd.setId(exist.getId());
-                    upd.setMetadata(metadata);
-                    upd.setImage(nftMetadataService.parseImage(metadata));
-                    itemTraitService.applyTraits(upd, item.getId(), metadata);
-                    upd.setUpdatedAt(now);
-                    nftMapper.updateTraits(upd);
-                    log.info("补全NFT属性 user={} item={} tokenId={} tx={}", user.getId(), item.getId(), value, txHash);
-                }
-            }
-            log.info("入账NFT user={} item={} tokenId={} tx={}", user.getId(), item.getId(), value, txHash);
+            handleErc721Transfer(item, contract, user, value.longValue(), txHash);
         } else {
             long systemAmount = value.divide(BigInteger.valueOf(item.getChainScale())).longValue();
             creditAsset(user.getId(), item, systemAmount, txHash, logIndex);
         }
+    }
+
+    /**
+     * 721 转入：属性不会变，只回填归属，不改动 metadata / 槽位
+     */
+    private void handleErc721Transfer(Item item, String contract, User user, long tokenId, String txHash) {
+        Nft nft = nftMapper.selectByContractAndTokenId(contract.toLowerCase(), tokenId);
+        if (nft == null) {
+            log.warn("NFT 未登记，跳过入账 contract={} tokenId={} tx={}", contract, tokenId, txHash);
+            return;
+        }
+        if (NftState.isLocked(nft.getState())) {
+            log.warn("NFT 处于挂单/提现中，跳过归属更新 nftId={} tokenId={} tx={}", nft.getId(), tokenId, txHash);
+            return;
+        }
+        if (user.getId().equals(nft.getOwnerId())) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        int updated = nftMapper.updateOwnerOnDeposit(nft.getId(), user.getId(), NftState.NORMAL,
+                NftState.LISTING, NftState.WITHDRAWING, now);
+        if (updated == 0) {
+            log.warn("NFT 归属更新失败 nftId={} tokenId={} tx={}", nft.getId(), tokenId, txHash);
+            return;
+        }
+        log.info("入账NFT user={} item={} tokenId={} tx={}", user.getId(), item.getId(), tokenId, txHash);
     }
 
     private void handleErc1155Transfer(String contract, String fromAddr, BigInteger tokenId, BigInteger value,

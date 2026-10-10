@@ -4,6 +4,7 @@ import com.mooar.market.common.ItemType;
 
 import com.mooar.market.common.BizException;
 import com.mooar.market.common.ErrorCode;
+import com.mooar.market.common.NftState;
 import com.mooar.market.common.TraitDef;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.dto.CollectionVO;
@@ -76,7 +77,7 @@ public class MarketService {
             if (nft == null || !nft.getOwnerId().equals(userId)) {
                 throw new BizException(ErrorCode.NFT_NOT_OWNER);
             }
-            if (nft.getState() != 0) {
+            if (!Integer.valueOf(NftState.NORMAL).equals(nft.getState())) {
                 throw new BizException(ErrorCode.NFT_LOCKED);
             }
             order.setNftId(nftId);
@@ -91,7 +92,7 @@ public class MarketService {
 
         orderMapper.insert(order);
         if (item.getType() == ItemType.ERC721) {
-            if (nftMapper.updateState(nftId, 0, 1, order.getId(), now) == 0) {
+            if (nftMapper.updateState(nftId, NftState.NORMAL, NftState.LISTING, order.getId(), now) == 0) {
                 throw new BizException(ErrorCode.NFT_LOCKED);
             }
         } else {
@@ -135,7 +136,7 @@ public class MarketService {
         userAssetMapper.addAvailable(order.getSellerId(), gmtId, sellerIncome, now);
 
         if (item.getType() == ItemType.ERC721) {
-            nftMapper.updateOwner(order.getNftId(), buyerId, now);
+            nftMapper.updateOwner(order.getNftId(), buyerId, NftState.NORMAL, now);
         } else {
             userAssetMapper.subFrozen(order.getSellerId(), item.getId(), order.getAmount(), now);
             creditAvailable(buyerId, item.getId(), order.getAmount(), now);
@@ -182,7 +183,7 @@ public class MarketService {
         }
         Item item = itemCache.getById(order.getItemId());
         if (item.getType() == ItemType.ERC721) {
-            nftMapper.updateState(order.getNftId(), 1, 0, 0L, now);
+            nftMapper.updateState(order.getNftId(), NftState.LISTING, NftState.NORMAL, 0L, now);
         } else {
             userAssetMapper.unfreeze(userId, order.getItemId(), order.getAmount(), now);
         }

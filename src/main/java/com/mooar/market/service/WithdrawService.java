@@ -4,6 +4,7 @@ import com.mooar.market.common.ItemType;
 
 import com.mooar.market.common.BizException;
 import com.mooar.market.common.ErrorCode;
+import com.mooar.market.common.NftState;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.entity.BalanceLog;
 import com.mooar.market.entity.Item;
@@ -68,11 +69,11 @@ public class WithdrawService {
             if (orderMapper.countActiveByNft(nftId) > 0) {
                 throw new BizException(ErrorCode.NFT_LOCKED);
             }
-            if (nftMapper.lockForWithdraw(nftId, userId, now) == 0) {
+            if (nftMapper.lockForWithdraw(nftId, userId, NftState.NORMAL, NftState.WITHDRAWING, now) == 0) {
                 throw new BizException(ErrorCode.NFT_LOCKED);
             }
             if (fee > 0 && userAssetMapper.freeze(userId, gmtItemId, fee, now) == 0) {
-                nftMapper.updateState(nftId, 2, 0, 0L, now);
+                nftMapper.updateState(nftId, NftState.WITHDRAWING, NftState.NORMAL, 0L, now);
                 throw new BizException(ErrorCode.ASSET_NOT_ENOUGH);
             }
             amount = 1L;
@@ -127,7 +128,7 @@ public class WithdrawService {
         long fee = withdraw.getFee() == null ? 0L : withdraw.getFee();
         Long gmtItemId = itemCache.getGmtItem().getId();
         if (item.getType() == ItemType.ERC721) {
-            nftMapper.release(withdraw.getNftId(), now);
+            nftMapper.release(withdraw.getNftId(), NftState.ONCHAIN, now);
             if (fee > 0) {
                 userAssetMapper.subFrozen(withdraw.getUserId(), gmtItemId, fee, now);
                 writeBalanceLog(withdraw.getUserId(), gmtItemId, -fee, now, 6, withdraw.getId());
@@ -154,7 +155,7 @@ public class WithdrawService {
         long fee = withdraw.getFee() == null ? 0L : withdraw.getFee();
         Long gmtItemId = itemCache.getGmtItem().getId();
         if (item.getType() == ItemType.ERC721) {
-            nftMapper.updateState(withdraw.getNftId(), 2, 0, 0L, now);
+            nftMapper.updateState(withdraw.getNftId(), NftState.WITHDRAWING, NftState.NORMAL, 0L, now);
             if (fee > 0) {
                 userAssetMapper.unfreeze(withdraw.getUserId(), gmtItemId, fee, now);
             }

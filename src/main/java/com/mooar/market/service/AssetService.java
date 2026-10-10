@@ -86,7 +86,7 @@ public class AssetService {
                 listing++;
             } else if (state == NftState.WITHDRAWING) {
                 withdrawing++;
-            } else {
+            } else if (state == NftState.NORMAL) {
                 normal++;
                 vo.getNftIds().add(nft.getTokenId());
             }
