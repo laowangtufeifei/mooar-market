@@ -4,10 +4,14 @@ import com.mooar.market.common.Result;
 import com.mooar.market.common.UserContext;
 import com.mooar.market.dto.BuyBatchReq;
 import com.mooar.market.dto.CreateOrderReq;
+import com.mooar.market.dto.OrderDetailVO;
+import com.mooar.market.dto.OrderItemVO;
+import com.mooar.market.dto.TraitSearchReq;
 import com.mooar.market.entity.Order;
 import com.mooar.market.service.MarketService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +34,11 @@ public class MarketController {
         return Result.ok(id);
     }
 
+    @GetMapping("/order/{orderId}")
+    public Result<OrderDetailVO> orderDetail(@PathVariable Long orderId) {
+        return Result.ok(marketService.orderDetail(orderId));
+    }
+
     @PostMapping("/buy")
     public Result<?> buy(@RequestParam Long orderId) {
         marketService.buyOrder(UserContext.get(), orderId);
@@ -44,9 +53,17 @@ public class MarketController {
 
     @GetMapping("/orders")
     public Result<List<Order>> orders(@RequestParam Long itemId,
-                                          @RequestParam(defaultValue = "1") int page,
-                                          @RequestParam(defaultValue = "20") int pageSize) {
+                                      @RequestParam(defaultValue = "1") int page,
+                                      @RequestParam(defaultValue = "20") int pageSize) {
         return Result.ok(marketService.listActive(itemId, page, pageSize));
+    }
+
+    /**
+     * 按属性筛选在售挂单，itemId 支持道具 id 或合约地址
+     */
+    @PostMapping("/orders-filter")
+    public Result<List<OrderItemVO>> ordersFilter(@RequestBody TraitSearchReq req) {
+        return Result.ok(marketService.searchOrders(marketService.resolveItemId(req.getItemId()), req));
     }
 
     @PostMapping("/preview")

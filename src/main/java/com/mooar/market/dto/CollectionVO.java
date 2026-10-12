@@ -8,6 +8,7 @@ public class CollectionVO {
     private String name;
     private Integer type;
     private String image;
+    private String traits;
     private Long minPrice;
     private Long stock;
     private Integer listingCount;

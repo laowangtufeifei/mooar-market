@@ -41,6 +41,7 @@ public class WithdrawService {
     private final WithdrawMapper withdrawMapper;
     private final BalanceLogMapper balanceLogMapper;
     private final MarketProperties properties;
+    private final MarketSearchCache searchCache;
 
     /**
      * 发起提现：冻结资产 + 冻结 GMT 手续费，生成待上链记录
@@ -65,6 +66,9 @@ public class WithdrawService {
             Nft nft = nftMapper.selectById(nftId);
             if (nft == null || !nft.getOwnerId().equals(userId)) {
                 throw new BizException(ErrorCode.NFT_NOT_OWNER);
+            }
+            if (!Integer.valueOf(NftState.NORMAL).equals(nft.getState())) {
+                throw new BizException(ErrorCode.NFT_LOCKED);
             }
             if (orderMapper.countActiveByNft(nftId) > 0) {
                 throw new BizException(ErrorCode.NFT_LOCKED);
@@ -133,6 +137,7 @@ public class WithdrawService {
                 userAssetMapper.subFrozen(withdraw.getUserId(), gmtItemId, fee, now);
                 writeBalanceLog(withdraw.getUserId(), gmtItemId, -fee, now, 6, withdraw.getId());
             }
+            searchCache.invalidate(withdraw.getItemId());
         } else if (item.getId().equals(gmtItemId)) {
             userAssetMapper.subFrozen(withdraw.getUserId(), gmtItemId, withdraw.getAmount() + fee, now);
             writeBalanceLog(withdraw.getUserId(), gmtItemId, -(withdraw.getAmount() + fee), now, 5, withdraw.getId());

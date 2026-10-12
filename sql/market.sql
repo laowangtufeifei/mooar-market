@@ -114,7 +114,8 @@ CREATE TABLE IF NOT EXISTS trade (
   fee BIGINT NOT NULL DEFAULT 0 COMMENT '手续费(GMT系统单位)',
   seller_id BIGINT NOT NULL,
   buyer_id BIGINT NOT NULL,
-  created_at BIGINT NOT NULL DEFAULT 0
+  created_at BIGINT NOT NULL DEFAULT 0,
+  KEY idx_created_item (created_at, item_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS withdraw (

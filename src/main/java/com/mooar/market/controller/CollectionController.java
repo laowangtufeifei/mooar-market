@@ -23,7 +23,7 @@ public class CollectionController {
 
     @GetMapping("/list")
     public Result<List<CollectionVO>> list() {
-        return Result.ok(marketService.listCollections());
+        return Result.ok(marketService.collectionsList());
     }
 
     /**

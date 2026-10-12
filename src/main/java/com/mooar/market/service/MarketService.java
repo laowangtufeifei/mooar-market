@@ -5,10 +5,15 @@ import com.mooar.market.common.ItemType;
 import com.mooar.market.common.BizException;
 import com.mooar.market.common.ErrorCode;
 import com.mooar.market.common.NftState;
+import com.mooar.market.common.OrderState;
 import com.mooar.market.common.TraitDef;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.dto.CollectionVO;
 import com.mooar.market.dto.NftOrderVO;
+import com.mooar.market.dto.OrderDetailVO;
+import com.mooar.market.dto.OrderItemVO;
+import com.mooar.market.dto.OrderRow;
+import com.mooar.market.dto.TraitSearchReq;
 import com.mooar.market.entity.BalanceLog;
 import com.mooar.market.entity.Item;
 import com.mooar.market.entity.Order;
@@ -27,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,6 +44,8 @@ public class MarketService {
 
     private static final Logger orderLog = LoggerFactory.getLogger("ORDER_LOG");
 
+    private static final String SORT_DESC = "desc";
+
     private final ItemCache itemCache;
     private final OrderMapper orderMapper;
     private final TradeMapper tradeMapper;
@@ -46,6 +54,7 @@ public class MarketService {
     private final BalanceLogMapper balanceLogMapper;
     private final MarketProperties properties;
     private final ItemTraitService itemTraitService;
+    private final MarketSearchCache searchCache;
 
     /**
      * 挂单：冻结资产并生成卖单
@@ -64,7 +73,7 @@ public class MarketService {
         order.setSellerId(userId);
         order.setItemId(itemId);
         order.setPrice(price);
-        order.setState(0);
+        order.setState(OrderState.ACTIVE);
         order.setBuyerId(0L);
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
@@ -102,6 +111,7 @@ public class MarketService {
         }
         orderLog.info("挂单 orderId={} seller={} item={} amount={} nftId={} price={}",
                 order.getId(), userId, itemId, amount, nftId, price);
+        searchCache.invalidate(itemId);
         return order.getId();
     }
 
@@ -114,7 +124,7 @@ public class MarketService {
         if (order == null) {
             throw new BizException(ErrorCode.ORDER_NOT_FOUND);
         }
-        if (order.getState() != 0) {
+        if (order.getState() != OrderState.ACTIVE) {
             throw new BizException(ErrorCode.ORDER_NOT_ACTIVE);
         }
         if (order.getSellerId().equals(buyerId)) {
@@ -127,7 +137,7 @@ public class MarketService {
         long sellerIncome = total - fee;
         Long gmtId = itemCache.getGmtItem().getId();
 
-        if (orderMapper.updateState(orderId, 0, 1, buyerId, now) == 0) {
+        if (orderMapper.updateState(orderId, OrderState.ACTIVE, OrderState.SOLD, buyerId, now) == 0) {
             throw new BizException(ErrorCode.ORDER_NOT_ACTIVE);
         }
         if (userAssetMapper.subAvailable(buyerId, gmtId, total, now) == 0) {
@@ -160,6 +170,7 @@ public class MarketService {
 
         orderLog.info("成交 orderId={} buyer={} seller={} item={} amount={} price={} total={} fee={}",
                 orderId, buyerId, order.getSellerId(), order.getItemId(), order.getAmount(), order.getPrice(), total, fee);
+        searchCache.invalidate(order.getItemId());
     }
 
     /**
@@ -174,11 +185,11 @@ public class MarketService {
         if (!order.getSellerId().equals(userId)) {
             throw new BizException(ErrorCode.FORBIDDEN);
         }
-        if (order.getState() != 0) {
+        if (order.getState() != OrderState.ACTIVE) {
             throw new BizException(ErrorCode.ORDER_NOT_ACTIVE);
         }
         long now = System.currentTimeMillis();
-        if (orderMapper.updateState(orderId, 0, 2, 0L, now) == 0) {
+        if (orderMapper.updateState(orderId, OrderState.ACTIVE, OrderState.CANCELED, 0L, now) == 0) {
             throw new BizException(ErrorCode.ORDER_NOT_ACTIVE);
         }
         Item item = itemCache.getById(order.getItemId());
@@ -188,12 +199,23 @@ public class MarketService {
             userAssetMapper.unfreeze(userId, order.getItemId(), order.getAmount(), now);
         }
         orderLog.info("取消挂单 orderId={} seller={} item={}", orderId, userId, order.getItemId());
+        searchCache.invalidate(order.getItemId());
     }
 
     /**
      * 查询在售挂单列表
      */
     public List<Order> listActive(Long itemId, int page, int pageSize) {
+        Item item = itemCache.getById(itemId);
+        List<Order> result = new ArrayList<>();
+        if (item.getType() == ItemType.ERC20) {
+            CollectionVO collectionVO = buildCollection(item);
+            Order order = new Order();
+            order.setAmount(Long.valueOf(collectionVO.getListingCount()));
+            order.setItemId(itemId);
+            order.setPrice(collectionVO.getMinPrice());
+            return result;
+        }
         return orderMapper.selectActive(itemId, (page - 1) * pageSize, pageSize);
     }
 
@@ -247,6 +269,131 @@ public class MarketService {
     }
 
     /**
+     * 按属性筛选在售挂单，同一条件的结果走缓存
+     */
+    public List<OrderItemVO> searchOrders(Long itemId, TraitSearchReq req) {
+        Item item = itemCache.getById(itemId);
+        if (item == null) {
+            throw new BizException(ErrorCode.ITEM_NOT_FOUND);
+        }
+        int page = Math.max(1, req.getPage());
+        int pageSize = Math.min(Math.max(1, req.getPageSize()), properties.getSearch().getMaxPageSize());
+        boolean is721 = item.getType() == ItemType.ERC721;
+        String tokenIdLike = is721 ? digitsOnly(req.getTokenId()) : null;
+        boolean desc = SORT_DESC.equalsIgnoreCase(req.getSortOrder());
+        String key = cacheKey(page, pageSize, req.getTraits(), tokenIdLike, desc);
+        return searchCache.get(itemId, key,
+                () -> queryOrders(item, req.getTraits(), tokenIdLike, desc, page, pageSize));
+    }
+
+    private List<OrderItemVO> queryOrders(Item item, Map<String, List<String>> traits, String tokenIdLike,
+                                          boolean desc, int page, int pageSize) {
+        List<ItemTraitService.TraitCond> conds = item.getType() == ItemType.ERC721
+                ? itemTraitService.translateTraits(item.getId(), traits)
+                : Collections.emptyList();
+        Map<String, Object> params = new HashMap<>();
+        params.put("itemId", item.getId());
+        params.put("activeState", OrderState.ACTIVE);
+        params.put("conds", conds);
+        params.put("offset", (page - 1) * pageSize);
+        params.put("limit", pageSize);
+        if (tokenIdLike != null) {
+            params.put("tokenIdLike", tokenIdLike);
+        }
+        params.put("desc", desc);
+        List<OrderRow> rows = orderMapper.searchOrders(params);
+
+        String itemImage = item.getImagePrefix() + item.getId();
+        List<OrderItemVO> result = new ArrayList<>(rows.size());
+        for (OrderRow row : rows) {
+            OrderItemVO vo = new OrderItemVO();
+            vo.setOrderId(row.getOrderId());
+            vo.setItemId(row.getItemId());
+            vo.setSellerId(row.getSellerId());
+            vo.setNftId(row.getNftId());
+            vo.setTokenId(row.getTokenId() == null ? 0L : row.getTokenId());
+            vo.setImage(row.getNftImage() == null || row.getNftImage().isBlank() ? itemImage : row.getNftImage());
+            vo.setAmount(row.getAmount());
+            vo.setPrice(row.getPrice());
+            result.add(vo);
+        }
+        return result;
+    }
+
+    /**
+     * 挂单详情：属性等完整内容在这里返回
+     */
+    public OrderDetailVO orderDetail(Long orderId) {
+        Order order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BizException(ErrorCode.ORDER_NOT_FOUND);
+        }
+        Item item = itemCache.getById(order.getItemId());
+        OrderDetailVO vo = new OrderDetailVO();
+        vo.setOrderId(order.getId());
+        vo.setItemId(order.getItemId());
+        vo.setSellerId(order.getSellerId());
+        vo.setNftId(order.getNftId());
+        vo.setAmount(order.getAmount());
+        vo.setPrice(order.getPrice());
+        vo.setState(order.getState());
+        vo.setCreatedAt(order.getCreatedAt());
+        vo.setUpdatedAt(order.getUpdatedAt());
+        vo.setTokenId(0L);
+        if (item != null) {
+            vo.setItemName(item.getName());
+            vo.setItemImage(item.getImagePrefix() + item.getId());
+        }
+        if (order.getNftId() != null && order.getNftId() > 0) {
+            Nft nft = nftMapper.selectById(order.getNftId());
+            if (nft != null) {
+                vo.setTokenId(nft.getTokenId());
+                vo.setImage(nft.getImage());
+                vo.setMetadata(nft.getMetadata());
+            }
+        }
+        if (vo.getImage() == null || vo.getImage().isBlank()) {
+            vo.setImage(vo.getItemImage());
+        }
+        return vo;
+    }
+
+    /**
+     * 缓存 key：条件规范化（属性名与值都排序），保证同一条件不同顺序命中同一份缓存
+     */
+    private String cacheKey(int page, int pageSize, Map<String, List<String>> traits, String tokenIdLike,
+                            boolean desc) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(page).append('#').append(pageSize);
+        if (tokenIdLike != null) {
+            sb.append("#token=").append(tokenIdLike);
+        }
+        sb.append("#sort=").append(desc ? "Desc" : "Asc");
+        if (traits != null && !traits.isEmpty()) {
+            traits.entrySet().stream()
+                    .filter(e -> e.getKey() != null && e.getValue() != null)
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> {
+                        List<String> values = new ArrayList<>(e.getValue());
+                        Collections.sort(values);
+                        sb.append('#').append(e.getKey()).append('=').append(String.join(",", values));
+                    });
+        }
+        return sb.toString();
+    }
+
+    /**
+     * tokenId 模糊搜索：只接受纯数字，顺带挡掉 LIKE 通配符（% _），非法输入按不筛处理
+     */
+    private String digitsOnly(String tokenId) {
+        if (tokenId == null || tokenId.isBlank()) {
+            return null;
+        }
+        String s = tokenId.trim();
+        return s.matches("\\d{1,19}") ? s : null;
+    }
+
+    /**
      * collection 列表：可交易道具（box/badge）的聚合信息
      */
     public List<CollectionVO> listCollections() {
@@ -257,6 +404,16 @@ public class MarketService {
                 continue;
             }
             result.add(buildCollection(item));
+        }
+        return result;
+    }
+
+    public List<CollectionVO> collectionsList() {
+        List<Item> items = itemCache.getAll();
+        List<CollectionVO> result = new ArrayList<>();
+        for (Item item : items) {
+            if(item.getType() == ItemType.ERC721 || item.getType() == ItemType.ERC1155)
+                result.add(buildCollectionList(item));
         }
         return result;
     }
@@ -363,7 +520,7 @@ public class MarketService {
             long cost = take * o.getPrice();
             long fee = cost * rate / 100;
             if (take == o.getAmount()) {
-                if (orderMapper.updateState(o.getId(), 0, 1, buyerId, now) == 0) {
+                if (orderMapper.updateState(o.getId(), OrderState.ACTIVE, OrderState.SOLD, buyerId, now) == 0) {
                     throw new BizException(ErrorCode.ORDER_PRICE_CHANGED);
                 }
             } else {
@@ -398,6 +555,7 @@ public class MarketService {
                     o.getId(), buyerId, o.getSellerId(), itemId, take, o.getPrice(), cost, fee);
             need -= take;
         }
+        searchCache.invalidate(itemId);
     }
 
     private CollectionVO buildCollection(Item item) {
@@ -416,6 +574,16 @@ public class MarketService {
             vo.setStock(orders.stream().mapToLong(Order::getAmount).sum());
             vo.setListingCount(orders.size());
         }
+        return vo;
+    }
+
+    private CollectionVO buildCollectionList(Item item) {
+        CollectionVO vo = new CollectionVO();
+        vo.setItemId(item.getId());
+        vo.setName(item.getName());
+        vo.setType(item.getType());
+        vo.setImage(item.getImagePrefix());
+        vo.setTraits(item.getTraitsJson());
         return vo;
     }
 

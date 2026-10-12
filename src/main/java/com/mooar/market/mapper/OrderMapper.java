@@ -1,13 +1,16 @@
 package com.mooar.market.mapper;
 
+import com.mooar.market.dto.OrderRow;
 import com.mooar.market.entity.Order;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.SelectProvider;
 import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
+import java.util.Map;
 
 public interface OrderMapper {
 
@@ -27,6 +30,9 @@ public interface OrderMapper {
 
     @Select("SELECT * FROM `order` WHERE seller_id = #{sellerId} ORDER BY id DESC")
     List<Order> selectBySeller(@Param("sellerId") Long sellerId);
+
+    @SelectProvider(type = OrderSqlProvider.class, method = "searchOrders")
+    List<OrderRow> searchOrders(Map<String, Object> params);
 
     @Select("SELECT COUNT(*) FROM `order` WHERE nft_id = #{nftId} AND nft_id > 0 AND state = 0")
     int countActiveByNft(@Param("nftId") Long nftId);

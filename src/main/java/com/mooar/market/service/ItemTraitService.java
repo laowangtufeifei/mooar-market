@@ -105,25 +105,51 @@ public class ItemTraitService {
             if (idx <= 0) {
                 continue;
             }
-            String val = part.substring(idx + 1).trim();
-            TraitDef def = defs.get(part.substring(0, idx).trim());
-            if (def != null && TraitDef.TYPE_NUMBER.equals(def.getType())) {
-                if (SLOT_WHITELIST.contains(def.getSlot())) {
-                    addNumberCond(conds, def.getSlot(), val);
+            addCond(conds, defs, part.substring(0, idx).trim(), part.substring(idx + 1).trim());
+        }
+        return conds;
+    }
+
+    /**
+     * 把前端 JSON 形式的筛选条件翻译成 SQL 条件，属性可以只传一部分
+     */
+    public List<TraitCond> translateTraits(Long itemId, Map<String, List<String>> traits) {
+        List<TraitCond> conds = new ArrayList<>();
+        if (traits == null || traits.isEmpty()) {
+            return conds;
+        }
+        Map<String, TraitDef> defs = getTraitDefs(itemId);
+        for (Map.Entry<String, List<String>> entry : traits.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            for (String val : entry.getValue()) {
+                if (val == null || val.isBlank()) {
+                    continue;
                 }
-                continue;
-            }
-            TraitDef owner = def != null && def.getValues() != null && def.getValues().containsKey(val)
-                    ? def : findByValue(defs, val);
-            if (owner == null || !SLOT_WHITELIST.contains(owner.getSlot())) {
-                continue;
-            }
-            Integer code = owner.getValues().get(val);
-            if (code != null) {
-                conds.add(new TraitCond(owner.getSlot(), "=", code));
+                addCond(conds, defs, entry.getKey().trim(), val.trim());
             }
         }
         return conds;
+    }
+
+    private void addCond(List<TraitCond> conds, Map<String, TraitDef> defs, String name, String val) {
+        TraitDef def = defs.get(name);
+        if (def != null && TraitDef.TYPE_NUMBER.equals(def.getType())) {
+            if (SLOT_WHITELIST.contains(def.getSlot())) {
+                addNumberCond(conds, def.getSlot(), val);
+            }
+            return;
+        }
+        TraitDef owner = def != null && def.getValues() != null && def.getValues().containsKey(val)
+                ? def : findByValue(defs, val);
+        if (owner == null || owner.getValues() == null || !SLOT_WHITELIST.contains(owner.getSlot())) {
+            return;
+        }
+        Integer code = owner.getValues().get(val);
+        if (code != null) {
+            conds.add(new TraitCond(owner.getSlot(), "=", code));
+        }
     }
 
     private void applyOne(Nft nft, Long itemId, Map<String, TraitDef> defs, String trait, String raw) {

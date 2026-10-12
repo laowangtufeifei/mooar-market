@@ -136,6 +136,11 @@ public class DepositScanner {
                     continue;
                 }
                 value = Numeric.toBigInt(topics.get(3));
+                if (!fitsLong(value)) {
+                    log.error("tokenId 超出 long 范围，跳过入账 contract={} tokenId={} tx={}",
+                            contract, value, l.getTransactionHash());
+                    continue;
+                }
             } else {
                 value = Numeric.toBigInt(l.getData());
             }
@@ -172,6 +177,11 @@ public class DepositScanner {
             }
             BigInteger tokenId = new BigInteger(data.substring(0, 64), 16);
             BigInteger value = new BigInteger(data.substring(64, 128), 16);
+            if (!fitsLong(tokenId)) {
+                log.error("tokenId 超出 long 范围，跳过入账 contract={} tokenId={} tx={}",
+                        contract, tokenId, l.getTransactionHash());
+                continue;
+            }
             int logIndex = l.getLogIndex().intValue();
             if (!markProcessed(l, fromAddr, master, contract, tokenId.longValue(), value.toString())) {
                 continue;
@@ -192,6 +202,15 @@ public class DepositScanner {
             long systemAmount = value.divide(BigInteger.valueOf(item.getChainScale())).longValue();
             creditAsset(user.getId(), item, systemAmount, txHash, logIndex);
         }
+    }
+
+    /**
+     * tokenId 是 uint256，超出 long 能表示的范围时必须跳过：
+     * longValue() 是静默截断，截断后的 id 可能撞上另一个 NFT（uk_contract_token），
+     * 导致把别人的 NFT 归属改掉
+     */
+    private boolean fitsLong(BigInteger value) {
+        return value.bitLength() <= 63;
     }
 
     /**
