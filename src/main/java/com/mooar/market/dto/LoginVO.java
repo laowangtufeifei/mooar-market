@@ -6,7 +6,10 @@ import lombok.Data;
 public class LoginVO {
     private String sessionId;
     private Long userId;
+    /** FSL 用户 id */
     private String fid;
-    private String address;
+    private String name;
+    private String avatar;
     private String email;
+    private String stepnEmail;
 }

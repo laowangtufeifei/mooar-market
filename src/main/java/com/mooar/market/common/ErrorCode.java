@@ -14,6 +14,7 @@ public enum ErrorCode {
 
     LOGIN_TOKEN_ERROR(1001, "登录凭证无效"),
     USER_NOT_FOUND(1002, "用户不存在"),
+    FSL_API_ERROR(1003, "登录服务异常，请稍后重试"),
 
     ITEM_NOT_FOUND(2001, "道具不存在"),
     ASSET_NOT_ENOUGH(2002, "资产余额不足"),

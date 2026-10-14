@@ -105,12 +105,19 @@ public class DepositScanner {
         return init;
     }
 
+    /**
+     * 扫块合约来自 item 表（state = 1），按 type 分流：
+     * 1=ERC20、3=ERC721 走 Transfer 事件，2=ERC1155 走 TransferSingle 事件
+     */
     private void scanRange(long from, long to) throws Exception {
         String master = properties.getChain().getMasterAddress().toLowerCase();
-        processTransfer(properties.getChain().getGmtContract(), from, to, master, false);
-        processTransfer(properties.getChain().getBadgeContract(), from, to, master, true);
-        processTransfer(properties.getChain().getMORCHIContract(), from, to, master, true);
-        processTransferSingle(properties.getChain().getBoxContract(), from, to, master);
+        for (Item item : itemCache.getScanItems()) {
+            if (item.getType() == ItemType.ERC1155) {
+                processTransferSingle(item.getContract(), from, to, master);
+            } else {
+                processTransfer(item.getContract(), from, to, master, item.getType() == ItemType.ERC721);
+            }
+        }
     }
 
     private void processTransfer(String contract, long from, long to, String master, boolean isNft) throws Exception {
@@ -289,7 +296,10 @@ public class DepositScanner {
         long now = System.currentTimeMillis();
         User u = new User();
         u.setFid("");
+        u.setName("");
+        u.setAvatar("");
         u.setEmail("");
+        u.setStepnEmail("");
         u.setAddress(address);
         u.setState(0);
         u.setCreatedAt(now);

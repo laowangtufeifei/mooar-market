@@ -10,20 +10,24 @@ CREATE TABLE IF NOT EXISTS item (
   chain_scale BIGINT NOT NULL DEFAULT 1 COMMENT '1 个系统单位对应的链上最小单位数，GMT=10^16',
   image_prefix VARCHAR(128) NOT NULL DEFAULT '',
   traits_json TEXT COMMENT 'trait 槽位定义 JSON（槽位↔属性名映射 + 值编码表，per-collection）',
-  state INT NOT NULL DEFAULT 0,
+  state INT NOT NULL DEFAULT 0 COMMENT '0=不扫块 1=扫块',
   created_at BIGINT NOT NULL DEFAULT 0,
   updated_at BIGINT NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `user` (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  fid VARCHAR(64) NOT NULL DEFAULT '' COMMENT '第三方id，扫块先建空 fid，登录回填',
+  fid VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'FSL 用户 id，扫块先建空 fid，登录回填',
+  name VARCHAR(64) NOT NULL DEFAULT '' COMMENT '昵称',
+  avatar VARCHAR(255) NOT NULL DEFAULT '' COMMENT '头像',
   email VARCHAR(128) NOT NULL DEFAULT '' COMMENT '邮箱',
-  address VARCHAR(64) NOT NULL COMMENT '钱包地址(小写)',
+  stepn_email VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'STEPN 邮箱',
+  address VARCHAR(64) NULL DEFAULT NULL COMMENT '钱包地址(小写)，登录时可能还没有',
   state INT NOT NULL DEFAULT 0,
   created_at BIGINT NOT NULL DEFAULT 0,
   updated_at BIGINT NOT NULL DEFAULT 0,
-  UNIQUE KEY uk_address (address)
+  UNIQUE KEY uk_address (address),
+  KEY idx_fid (fid)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS user_asset (

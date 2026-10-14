@@ -8,8 +8,14 @@ import java.util.List;
 
 public interface ItemMapper {
 
-    @Select("SELECT * FROM item WHERE state = 0")
+    @Select("SELECT * FROM item")
     List<Item> selectAll();
+
+    /**
+     * 需要扫块的道具：item.state = 1
+     */
+    @Select("SELECT * FROM item WHERE state = 1")
+    List<Item> selectScanItems();
 
     @Select("SELECT * FROM item WHERE id = #{id}")
     Item selectById(@Param("id") Long id);

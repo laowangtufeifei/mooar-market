@@ -16,6 +16,7 @@ public class MarketProperties {
     private Admin admin = new Admin();
     private Fee fee = new Fee();
     private Search search = new Search();
+    private Fsl fsl = new Fsl();
 
     @Data
     public static class Jwt {
@@ -23,17 +24,34 @@ public class MarketProperties {
         private String publicKey;
     }
 
+    /**
+     * FSL 登录对接：拿前端给的 authorization_code 换 access_token 再拉用户资料
+     */
+    @Data
+    public static class Fsl {
+        private String url;
+        private String appKey;
+        private String appSecret;
+        /**
+         * 用户信息里钱包地址所在的字段名（如 "address" / "solAddress"），
+         * 配了才会把地址绑定到 user.address，用来和扫块建的用户合并
+         */
+        private String addressField = "evmAddress";
+        /** 单次 HTTP 超时（毫秒） */
+        private int timeoutMs = 5000;
+        /** code -> userId 缓存时长（秒），同一个 code 重复登录直接复用 */
+        private long codeCacheSeconds = 600;
+    }
+
+    /**
+     * 链上配置。扫哪些合约不再写在这里，由 item 表的 contract + state 决定
+     */
     @Data
     public static class Chain {
         private String rpc;
         private long chainId;
         private String masterAddress;
         private String encryptKey;
-        private String gmtContract;
-        private String boxContract;
-        private String badgeContract;
-        private String MORCHIContract;
-        private long boxTokenId;
         private long gasLimit;
     }
 

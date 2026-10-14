@@ -4,5 +4,6 @@ import lombok.Data;
 
 @Data
 public class LoginReq {
-    private String token;
+    /** FSL 授权码 */
+    private String code;
 }
