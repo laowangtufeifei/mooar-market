@@ -17,6 +17,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * FSL 登录对接：authorization_code 换 access_token，再用 token 拉用户资料
  */
@@ -36,6 +39,10 @@ public class FslApiService {
         factory.setConnectTimeout(conf.getTimeoutMs());
         factory.setReadTimeout(conf.getTimeoutMs());
         this.restTemplate = new RestTemplate(factory);
+        if (conf.getUrl() != null && conf.getUrl().startsWith("http://")) {
+            loginLog.warn("FSL 地址配的是 http，服务端会 301 跳 https 且不会跟随重定向，" +
+                    "会导致响应体为空；建议直接配 https: {}", conf.getUrl());
+        }
     }
 
     /**
@@ -46,8 +53,12 @@ public class FslApiService {
         JsonNode data = getUserInfo(accessToken);
         long uid = data.path("fslUid").asLong();
         if (uid <= 0) {
-            loginLog.error("FSL 用户资料缺少 fslUid, data={}", data);
+            loginLog.error("FSL not find fslUid, data={}", data);
             throw new BizException(ErrorCode.FSL_API_ERROR);
+        }
+        if (properties.getFsl().getAddressField() == null || properties.getFsl().getAddressField().isBlank()) {
+            loginLog.info("FSL info: {}",
+                    fieldNames(data));
         }
         return new FslUserInfo(uid,
                 data.path("name").asText(""),
@@ -67,7 +78,7 @@ public class FslApiService {
                 .queryParam("authorization_code", code)
                 .build()
                 .toUriString();
-        String body = post(url);
+        String body = get(url);
         JsonNode json = parse(body);
         String accessToken = json == null ? "" : json.path("data").path("access_token").asText("");
         if (accessToken.isBlank()) {
@@ -121,13 +132,22 @@ public class FslApiService {
         return address.isBlank() ? null : address.toLowerCase();
     }
 
-    private String post(String url) {
+    private String get(String url) {
         try {
-            return restTemplate.postForObject(url, null, String.class);
+            return restTemplate.getForObject(url, String.class);
         } catch (Exception e) {
             loginLog.error("FSL 请求异常 url={} err={}", url, e.getMessage());
             throw new BizException(ErrorCode.FSL_API_ERROR);
         }
+    }
+
+    /**
+     * 只取字段名用于排查，不打日志输出值
+     */
+    private String fieldNames(JsonNode data) {
+        List<String> names = new ArrayList<>();
+        data.fieldNames().forEachRemaining(names::add);
+        return String.join(", ", names);
     }
 
     private JsonNode parse(String body) {
