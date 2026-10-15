@@ -46,7 +46,7 @@ public class AssetService {
             vo.setItemId(item.getId());
             vo.setName(item.getName());
             vo.setType(item.getType());
-            vo.setImage(item.getImagePrefix() + item.getId());
+            vo.setImage(item.getImagePrefix());
             if (item.getType() == ItemType.ERC721) {
                 fillNft(vo, nftMap.getOrDefault(item.getId(), Collections.emptyList()));
             } else {

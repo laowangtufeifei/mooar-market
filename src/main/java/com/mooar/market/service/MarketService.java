@@ -303,7 +303,7 @@ public class MarketService {
         params.put("desc", desc);
         List<OrderRow> rows = orderMapper.searchOrders(params);
 
-        String itemImage = item.getImagePrefix() + item.getId();
+        String itemImage = item.getImagePrefix();
         List<OrderItemVO> result = new ArrayList<>(rows.size());
         for (OrderRow row : rows) {
             OrderItemVO vo = new OrderItemVO();
@@ -342,7 +342,7 @@ public class MarketService {
         vo.setTokenId(0L);
         if (item != null) {
             vo.setItemName(item.getName());
-            vo.setItemImage(item.getImagePrefix() + item.getId());
+            vo.setItemImage(item.getImagePrefix());
         }
         if (order.getNftId() != null && order.getNftId() > 0) {
             Nft nft = nftMapper.selectById(order.getNftId());
@@ -564,7 +564,7 @@ public class MarketService {
         vo.setItemId(item.getId());
         vo.setName(item.getName());
         vo.setType(item.getType());
-        vo.setImage(item.getImagePrefix() + item.getId());
+        vo.setImage(item.getImagePrefix());
         if (orders.isEmpty()) {
             vo.setMinPrice(null);
             vo.setStock(0L);

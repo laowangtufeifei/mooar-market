@@ -36,6 +36,7 @@ public class AuthController {
         vo.setAvatar(user.getAvatar());
         vo.setEmail(user.getEmail());
         vo.setStepnEmail(user.getStepnEmail());
+        vo.setAddress(user.getAddress());
         return Result.ok(vo);
     }
 

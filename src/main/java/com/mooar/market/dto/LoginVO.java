@@ -12,4 +12,5 @@ public class LoginVO {
     private String avatar;
     private String email;
     private String stepnEmail;
+    private String address;
 }
