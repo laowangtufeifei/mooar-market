@@ -24,6 +24,8 @@ public class WithdrawRetryJob {
 
     private static final Logger withdrawLog = LoggerFactory.getLogger("WITHDRAW_LOG");
     private static final int MAX_RETRY = 5;
+    /** withdraw.err_msg 的列宽 */
+    private static final int ERR_MSG_MAX_LENGTH = 256;
 
     private final WithdrawMapper withdrawMapper;
     private final WithdrawService withdrawService;
@@ -92,15 +94,25 @@ public class WithdrawRetryJob {
 
     private void fail(Withdraw w, String errMsg) {
         int retry = w.getRetryCount() + 1;
+        long now = System.currentTimeMillis();
+        String dbMsg = truncate(errMsg);
         if (retry >= MAX_RETRY) {
-            withdrawMapper.updateFail(w.getId(), WithdrawService.STATE_MANUAL, retry, errMsg,
-                    System.currentTimeMillis());
-            withdrawService.rollbackWithdraw(w);
+            // 只标记转人工，不回滚资产：提现一提交就冻结，失败也不还给用户，避免资产对不上与重复出金
+            withdrawMapper.updateFail(w.getId(), WithdrawService.STATE_MANUAL, retry, dbMsg, now);
             withdrawLog.error("提现超限转人工 id={} retry={} err={}", w.getId(), retry, errMsg);
         } else {
-            withdrawMapper.updateFail(w.getId(), WithdrawService.STATE_PENDING, retry, errMsg,
-                    System.currentTimeMillis());
+            withdrawMapper.updateFail(w.getId(), WithdrawService.STATE_PENDING, retry, dbMsg, now);
             withdrawLog.warn("提现失败待重试 id={} retry={} err={}", w.getId(), retry, errMsg);
         }
+    }
+
+    /**
+     * err_msg 是 VARCHAR(256)，超长会抛 DataTooLongException 打断重试循环；日志里仍保留完整消息
+     */
+    private String truncate(String errMsg) {
+        if (errMsg == null) {
+            return "";
+        }
+        return errMsg.length() > ERR_MSG_MAX_LENGTH ? errMsg.substring(0, ERR_MSG_MAX_LENGTH) : errMsg;
     }
 }

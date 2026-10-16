@@ -207,6 +207,10 @@ public class DepositScanner {
             handleErc721Transfer(item, contract, user, value.longValue(), txHash);
         } else {
             long systemAmount = value.divide(BigInteger.valueOf(item.getChainScale())).longValue();
+            if (systemAmount <= 0) {
+                log.warn("链上金额换算后为 0，跳过入账：contract={} 链上金额={} chainScale={} from={} tx={}，" +
+                        "请检查 item.chain_scale 是否与该代币精度匹配", contract, value, item.getChainScale(), fromAddr, txHash);
+            }
             creditAsset(user.getId(), item, systemAmount, txHash, logIndex);
         }
     }

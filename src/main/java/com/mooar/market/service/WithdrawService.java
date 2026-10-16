@@ -152,7 +152,8 @@ public class WithdrawService {
     }
 
     /**
-     * 提现失败后回滚冻结资产与手续费
+     * 回滚冻结资产与手续费。提现失败后不再自动调用（失败只标记转人工审核），
+     * 保留此方法供人工审核确认退款时手动调用
      */
     public void rollbackWithdraw(Withdraw withdraw) {
         Item item = itemCache.getById(withdraw.getItemId());
