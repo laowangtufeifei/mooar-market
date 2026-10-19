@@ -1,5 +1,6 @@
 package com.mooar.market.mapper;
 
+import com.mooar.market.dto.OrderAggRow;
 import com.mooar.market.dto.OrderRow;
 import com.mooar.market.entity.Order;
 import org.apache.ibatis.annotations.Insert;
@@ -33,6 +34,13 @@ public interface OrderMapper {
 
     @SelectProvider(type = OrderSqlProvider.class, method = "searchOrders")
     List<OrderRow> searchOrders(Map<String, Object> params);
+
+    /**
+     * 1155 挂单聚合：最低价 + 在售总量（列表页不逐单返回）
+     */
+    @Select("SELECT COALESCE(MIN(price), 0) AS min_price, COALESCE(SUM(amount), 0) AS total_amount " +
+            "FROM `order` WHERE item_id = #{itemId} AND state = #{state}")
+    OrderAggRow selectAggByItem(@Param("itemId") Long itemId, @Param("state") Integer state);
 
     @Select("SELECT COUNT(*) FROM `order` WHERE nft_id = #{nftId} AND nft_id > 0 AND state = 0")
     int countActiveByNft(@Param("nftId") Long nftId);

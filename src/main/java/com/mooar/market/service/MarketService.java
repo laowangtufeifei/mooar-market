@@ -10,6 +10,7 @@ import com.mooar.market.common.TraitDef;
 import com.mooar.market.config.MarketProperties;
 import com.mooar.market.dto.CollectionVO;
 import com.mooar.market.dto.NftOrderVO;
+import com.mooar.market.dto.OrderAggRow;
 import com.mooar.market.dto.OrderDetailVO;
 import com.mooar.market.dto.OrderItemVO;
 import com.mooar.market.dto.OrderRow;
@@ -276,6 +277,10 @@ public class MarketService {
         if (item == null) {
             throw new BizException(ErrorCode.ITEM_NOT_FOUND);
         }
+        // 1155 是按量成交的同质化道具：列表只给「最低价 + 在售总量」，不逐单返回，分页/排序/属性筛选都不适用
+        if (item.getType() == ItemType.ERC1155) {
+            return searchCache.get(itemId, "1155-agg", () -> queryAggOrders(item));
+        }
         int page = Math.max(1, req.getPage());
         int pageSize = Math.min(Math.max(1, req.getPageSize()), properties.getSearch().getMaxPageSize());
         boolean is721 = item.getType() == ItemType.ERC721;
@@ -317,6 +322,27 @@ public class MarketService {
             vo.setPrice(row.getPrice());
             result.add(vo);
         }
+        return result;
+    }
+
+    /**
+     * 1155 挂单聚合：一条记录 = 最低价 + 在售总量。
+     * 没有在售挂单时返回空列表；orderId / sellerId 对聚合行无意义，置空
+     */
+    private List<OrderItemVO> queryAggOrders(Item item) {
+        OrderAggRow agg = orderMapper.selectAggByItem(item.getId(), OrderState.ACTIVE);
+        if (agg == null || agg.getTotalAmount() == null || agg.getTotalAmount() <= 0) {
+            return Collections.emptyList();
+        }
+        OrderItemVO vo = new OrderItemVO();
+        vo.setItemId(item.getId());
+        vo.setNftId(0L);
+        vo.setTokenId(0L);
+        vo.setImage(item.getImagePrefix());
+        vo.setAmount(agg.getTotalAmount());
+        vo.setPrice(agg.getMinPrice());
+        List<OrderItemVO> result = new ArrayList<>(1);
+        result.add(vo);
         return result;
     }
 
