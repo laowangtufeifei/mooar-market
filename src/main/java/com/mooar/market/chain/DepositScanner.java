@@ -254,6 +254,8 @@ public class DepositScanner {
                                        String txHash, int logIndex) {
         Item item = itemCache.getByContractAndTokenId(contract, tokenId.longValue());
         if (item == null) {
+            log.warn("1155 道具未登记（contract+tokenId 在 item 表查不到），跳过入账 contract={} tokenId={} tx={}",
+                    contract, tokenId, txHash);
             return;
         }
         User user = getOrCreateUser(fromAddr);

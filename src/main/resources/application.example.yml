@@ -27,7 +27,7 @@ market:
     chainId: 137
     masterAddress: "0x0000000000000000000000000000000000000000"
     encryptKey: "your-aes-encrypt-key-base64"
-    gasLimit: 100000
+    gasLimit: 300000
   item:
     imagePrefix: "http://mooar-market/"
   scan:

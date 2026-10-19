@@ -2,8 +2,10 @@ package com.mooar.market.service;
 
 import com.mooar.market.common.ItemType;
 import com.mooar.market.common.NftState;
+import com.mooar.market.common.OrderState;
 import com.mooar.market.dto.AssetVO;
 import com.mooar.market.dto.NftAssetVO;
+import com.mooar.market.dto.OrderAssetVO;
 import com.mooar.market.entity.Item;
 import com.mooar.market.entity.Nft;
 import com.mooar.market.entity.Order;
@@ -39,6 +41,9 @@ public class AssetService {
         Map<Long, List<Nft>> nftMap = nftMapper.selectByOwner(userId).stream()
                 .filter(n -> n.getItemId() != null)
                 .collect(Collectors.groupingBy(Nft::getItemId));
+        Map<Long, List<Order>> orderMap = orderMapper.selectBySeller(userId).stream()
+                .filter(o -> Integer.valueOf(OrderState.ACTIVE).equals(o.getState()))
+                .collect(Collectors.groupingBy(Order::getItemId));
 
         List<AssetVO> result = new ArrayList<>();
         for (Item item : items) {
@@ -47,20 +52,37 @@ public class AssetService {
             vo.setName(item.getName());
             vo.setType(item.getType());
             vo.setImage(item.getImagePrefix());
+            List<Order> orders = orderMap.getOrDefault(item.getId(), Collections.emptyList());
+            fillOrderList(vo, orders);
             if (item.getType() == ItemType.ERC721) {
                 fillNft(vo, nftMap.getOrDefault(item.getId(), Collections.emptyList()));
             } else {
                 UserAsset a = assetMap.get(item.getId());
                 long available = a == null ? 0L : a.getAvailable();
                 long frozen = a == null ? 0L : a.getFrozen();
+                long listing = 0;
+                for (Order order : orders) {
+                    listing += order.getAmount() == null ? 0L : order.getAmount();
+                }
                 vo.setAvailable(available);
                 vo.setFrozen(frozen);
-                vo.setListing(frozen);
-                vo.setWithdrawing(0L);
+                vo.setListing(listing);
+                // 1155 的 frozen = 挂单冻结 + 提现冻结，减掉挂单剩下的是提现中的
+                vo.setWithdrawing(Math.max(0L, frozen - listing));
             }
             result.add(vo);
         }
         return result;
+    }
+
+    private void fillOrderList(AssetVO vo, List<Order> orders) {
+        for (Order order : orders) {
+            OrderAssetVO o = new OrderAssetVO();
+            o.setOrderId(order.getId());
+            o.setPrice(order.getPrice());
+            o.setAmount(order.getAmount());
+            vo.getOrderList().add(o);
+        }
     }
 
     private void fillNft(AssetVO vo, List<Nft> nfts) {

@@ -2,8 +2,11 @@ package com.mooar.market.job;
 
 import com.mooar.market.chain.ChainTransferService;
 import com.mooar.market.common.AppShutdown;
+import com.mooar.market.common.ItemType;
 import com.mooar.market.entity.Item;
+import com.mooar.market.entity.Nft;
 import com.mooar.market.entity.Withdraw;
+import com.mooar.market.mapper.NftMapper;
 import com.mooar.market.mapper.WithdrawMapper;
 import com.mooar.market.service.ItemCache;
 import com.mooar.market.service.WithdrawService;
@@ -31,6 +34,7 @@ public class WithdrawRetryJob {
     private final WithdrawService withdrawService;
     private final ChainTransferService chainTransferService;
     private final ItemCache itemCache;
+    private final NftMapper nftMapper;
     private final Web3j web3j;
     private final AppShutdown appShutdown;
 
@@ -47,7 +51,17 @@ public class WithdrawRetryJob {
         for (Withdraw w : pending) {
             try {
                 Item item = itemCache.getById(w.getItemId());
-                String txHash = chainTransferService.sendTransfer(item, w.getToAddr(), w.getAmount(), w.getNftId());
+                // 721 的 nft_id 是 nft 表主键，链上要用 token_id，直接拿主键发会转错或 revert
+                Long tokenId = w.getNftId();
+                if (item.getType() == ItemType.ERC721) {
+                    Nft nft = nftMapper.selectById(w.getNftId());
+                    if (nft == null) {
+                        fail(w, "nft record not found: nftId=" + w.getNftId());
+                        continue;
+                    }
+                    tokenId = nft.getTokenId();
+                }
+                String txHash = chainTransferService.sendTransfer(item, w.getToAddr(), w.getAmount(), tokenId);
                 withdrawMapper.updateTxHash(w.getId(), WithdrawService.STATE_PENDING,
                         WithdrawService.STATE_BROADCAST, txHash, System.currentTimeMillis());
                 withdrawLog.info("提现上链 id={} item={} to={} txHash={}",

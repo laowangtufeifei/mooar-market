@@ -52,7 +52,8 @@ public class MarketProperties {
         private long chainId;
         private String masterAddress;
         private String encryptKey;
-        private long gasLimit;
+        /** gas 估算失败时的兜底上限；正常走 eth_estimateGas 动态估算 */
+        private long gasLimit = 300000;
     }
 
     @Data
