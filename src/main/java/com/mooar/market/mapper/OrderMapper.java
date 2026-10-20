@@ -36,11 +36,15 @@ public interface OrderMapper {
     List<OrderRow> searchOrders(Map<String, Object> params);
 
     /**
-     * 1155 挂单聚合：最低价 + 在售总量（列表页不逐单返回）
+     * 1155 挂单按道具聚合：最低价 + 在售总量（列表页不逐单返回）。
+     * 传多个 itemId 时一条 SQL 按 item_id 分组返回，避免 N+1
      */
-    @Select("SELECT COALESCE(MIN(price), 0) AS min_price, COALESCE(SUM(amount), 0) AS total_amount " +
-            "FROM `order` WHERE item_id = #{itemId} AND state = #{state}")
-    OrderAggRow selectAggByItem(@Param("itemId") Long itemId, @Param("state") Integer state);
+    @Select("<script>SELECT item_id, COALESCE(MIN(price), 0) AS min_price, " +
+            "COALESCE(SUM(amount), 0) AS total_amount FROM `order` " +
+            "WHERE state = #{state} AND item_id IN " +
+            "<foreach collection='itemIds' item='id' open='(' separator=',' close=')'>#{id}</foreach> " +
+            "GROUP BY item_id</script>")
+    List<OrderAggRow> selectAggByItems(@Param("itemIds") List<Long> itemIds, @Param("state") Integer state);
 
     @Select("SELECT COUNT(*) FROM `order` WHERE nft_id = #{nftId} AND nft_id > 0 AND state = 0")
     int countActiveByNft(@Param("nftId") Long nftId);

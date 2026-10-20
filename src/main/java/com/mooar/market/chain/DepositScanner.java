@@ -109,23 +109,26 @@ public class DepositScanner {
      * 扫块合约来自 item 表（state = 1），按 type 分流：
      * 1=ERC20、3=ERC721 走 Transfer 事件，2=ERC1155 走 TransferSingle 事件
      */
-    private void scanRange(long from, long to) throws Exception {
+    public int scanRange(long from, long to) throws Exception {
         String master = properties.getChain().getMasterAddress().toLowerCase();
+        int processed = 0;
         for (Item item : itemCache.getScanItems()) {
             if (item.getType() == ItemType.ERC1155) {
-                processTransferSingle(item.getContract(), from, to, master);
+                processed += processTransferSingle(item.getContract(), from, to, master);
             } else {
-                processTransfer(item.getContract(), from, to, master, item.getType() == ItemType.ERC721);
+                processed += processTransfer(item.getContract(), from, to, master, item.getType() == ItemType.ERC721);
             }
         }
+        return processed;
     }
 
-    private void processTransfer(String contract, long from, long to, String master, boolean isNft) throws Exception {
+    private int processTransfer(String contract, long from, long to, String master, boolean isNft) throws Exception {
         EthFilter filter = new EthFilter(
                 DefaultBlockParameter.valueOf(BigInteger.valueOf(from)),
                 DefaultBlockParameter.valueOf(BigInteger.valueOf(to)), contract);
         filter.addSingleTopic(TRANSFER_TOPIC);
         EthLog ethLog = web3j.ethGetLogs(filter).send();
+        int processed = 0;
         List<Log> logs = toLogs(ethLog);
         for (Log l : logs) {
             List<String> topics = l.getTopics();
@@ -157,16 +160,19 @@ public class DepositScanner {
             if (!markProcessed(l, fromAddr, master, contract, tokenId, amount)) {
                 continue;
             }
+            processed++;
             handleErcTransfer(contract, fromAddr, value, l.getTransactionHash(), logIndex);
         }
+        return processed;
     }
 
-    private void processTransferSingle(String contract, long from, long to, String master) throws Exception {
+    private int processTransferSingle(String contract, long from, long to, String master) throws Exception {
         EthFilter filter = new EthFilter(
                 DefaultBlockParameter.valueOf(BigInteger.valueOf(from)),
                 DefaultBlockParameter.valueOf(BigInteger.valueOf(to)), contract);
         filter.addSingleTopic(TRANSFER_SINGLE_TOPIC);
         EthLog ethLog = web3j.ethGetLogs(filter).send();
+        int processed = 0;
         List<Log> logs = toLogs(ethLog);
         for (Log l : logs) {
             List<String> topics = l.getTopics();
@@ -193,8 +199,10 @@ public class DepositScanner {
             if (!markProcessed(l, fromAddr, master, contract, tokenId.longValue(), value.toString())) {
                 continue;
             }
+            processed++;
             handleErc1155Transfer(contract, fromAddr, tokenId, value, l.getTransactionHash(), logIndex);
         }
+        return processed;
     }
 
     private void handleErcTransfer(String contract, String fromAddr, BigInteger value, String txHash, int logIndex) {

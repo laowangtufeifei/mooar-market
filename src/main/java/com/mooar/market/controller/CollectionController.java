@@ -31,7 +31,7 @@ public class CollectionController {
      */
     @GetMapping("/{itemId}")
     public Result<List<Object>> detail(@PathVariable String itemId) {
-        return Result.ok(marketService.collectionDetail(marketService.resolveItemId(itemId)));
+        return Result.ok(marketService.collectionDetail(itemId));
     }
 
     @GetMapping("/{itemId}/traits")

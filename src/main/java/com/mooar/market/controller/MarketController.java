@@ -59,11 +59,12 @@ public class MarketController {
     }
 
     /**
-     * 按属性筛选在售挂单，itemId 支持道具 id 或合约地址
+     * 按属性筛选在售挂单。itemId 支持道具 id 或合约地址：
+     * 传合约时，1155 会按 tokenId 分组返回（每个 tokenId 一条聚合），721 保持逐单返回
      */
     @PostMapping("/orders-filter")
     public Result<List<OrderItemVO>> ordersFilter(@RequestBody TraitSearchReq req) {
-        return Result.ok(marketService.searchOrders(marketService.resolveItemId(req.getItemId()), req));
+        return Result.ok(marketService.searchOrders(req.getItemId(), req));
     }
 
     @PostMapping("/preview")

@@ -34,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -110,8 +111,8 @@ public class MarketService {
                 throw new BizException(ErrorCode.ASSET_NOT_ENOUGH);
             }
         }
-        orderLog.info("挂单 orderId={} seller={} item={} amount={} nftId={} price={}",
-                order.getId(), userId, itemId, amount, nftId, price);
+        orderLog.info("挂单 orderId={} seller={} item={} amount={} nftId={} 单价={} 总价={}",
+                order.getId(), userId, itemId, amount, nftId, price, price * (amount == null ? 1L : amount));
         searchCache.invalidate(itemId);
         return order.getId();
     }
@@ -272,15 +273,17 @@ public class MarketService {
     /**
      * 按属性筛选在售挂单，同一条件的结果走缓存
      */
-    public List<OrderItemVO> searchOrders(Long itemId, TraitSearchReq req) {
-        Item item = itemCache.getById(itemId);
-        if (item == null) {
+    public List<OrderItemVO> searchOrders(String itemIdOrContract, TraitSearchReq req) {
+        List<Item> group = resolveCollectionItems(itemIdOrContract);
+        if (group.isEmpty()) {
             throw new BizException(ErrorCode.ITEM_NOT_FOUND);
         }
-        // 1155 是按量成交的同质化道具：列表只给「最低价 + 在售总量」，不逐单返回，分页/排序/属性筛选都不适用
+        Item item = group.get(0);
+        // 1155 是按量成交的同质化道具：整个 collection 按 tokenId 分组，每个 tokenId 只给「最低价 + 在售总量」
         if (item.getType() == ItemType.ERC1155) {
-            return searchCache.get(itemId, "1155-agg", () -> queryAggOrders(item));
+            return queryAggOrders(group, req);
         }
+        Long itemId = item.getId();
         int page = Math.max(1, req.getPage());
         int pageSize = Math.min(Math.max(1, req.getPageSize()), properties.getSearch().getMaxPageSize());
         boolean is721 = item.getType() == ItemType.ERC721;
@@ -326,24 +329,71 @@ public class MarketService {
     }
 
     /**
-     * 1155 挂单聚合：一条记录 = 最低价 + 在售总量。
-     * 没有在售挂单时返回空列表；orderId / sellerId 对聚合行无意义，置空
+     * 1155 挂单聚合：整个 collection 按 tokenId（= item）分组，每个 tokenId 一条「最低价 + 在售总量」，
+     * 没有再按订单拆开。orderId / sellerId 对聚合行无意义，置空。
+     * 一条 SQL 拿到所有 tokenId 的聚合，不走缓存（避免订单变更时失效不彻底）
      */
-    private List<OrderItemVO> queryAggOrders(Item item) {
-        OrderAggRow agg = orderMapper.selectAggByItem(item.getId(), OrderState.ACTIVE);
-        if (agg == null || agg.getTotalAmount() == null || agg.getTotalAmount() <= 0) {
-            return Collections.emptyList();
+    private List<OrderItemVO> queryAggOrders(List<Item> group, TraitSearchReq req) {
+        List<Long> ids = new ArrayList<>(group.size());
+        for (Item item : group) {
+            ids.add(item.getId());
         }
-        OrderItemVO vo = new OrderItemVO();
-        vo.setItemId(item.getId());
-        vo.setNftId(0L);
-        vo.setTokenId(0L);
-        vo.setImage(item.getImagePrefix());
-        vo.setAmount(agg.getTotalAmount());
-        vo.setPrice(agg.getMinPrice());
-        List<OrderItemVO> result = new ArrayList<>(1);
-        result.add(vo);
-        return result;
+        Map<Long, OrderAggRow> aggMap = new HashMap<>();
+        for (OrderAggRow row : orderMapper.selectAggByItems(ids, OrderState.ACTIVE)) {
+            aggMap.put(row.getItemId(), row);
+        }
+        List<OrderItemVO> list = new ArrayList<>();
+        for (Item item : group) {
+            OrderAggRow agg = aggMap.get(item.getId());
+            if (agg == null || agg.getTotalAmount() == null || agg.getTotalAmount() <= 0) {
+                continue;
+            }
+            OrderItemVO vo = new OrderItemVO();
+            vo.setItemId(item.getId());
+            vo.setTokenId(item.getTokenId());
+            vo.setNftId(0L);
+            vo.setImage(item.getImagePrefix());
+            vo.setAmount(agg.getTotalAmount());
+            vo.setPrice(agg.getMinPrice());
+            list.add(vo);
+        }
+        boolean desc = SORT_DESC.equalsIgnoreCase(req.getSortOrder());
+        list.sort((a, b) -> {
+            int c = Long.compare(a.getPrice() == null ? 0 : a.getPrice(), b.getPrice() == null ? 0 : b.getPrice());
+            if (c == 0) {
+                c = Long.compare(a.getTokenId() == null ? 0 : a.getTokenId(),
+                        b.getTokenId() == null ? 0 : b.getTokenId());
+            }
+            return desc ? -c : c;
+        });
+        int page = Math.max(1, req.getPage());
+        int pageSize = Math.min(Math.max(1, req.getPageSize()), properties.getSearch().getMaxPageSize());
+        int from = Math.min((page - 1) * pageSize, list.size());
+        int to = Math.min(from + pageSize, list.size());
+        return new ArrayList<>(list.subList(from, to));
+    }
+
+    /**
+     * 解析 collection：传道具 id 只返回那一个 item；传合约返回该合约下所有 item（1155 即多个 tokenId）
+     */
+    private List<Item> resolveCollectionItems(String key) {
+        if (key == null || key.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        String k = key.trim();
+        if (k.matches("\\d{1,19}")) {
+            Item item = itemCache.getById(Long.parseLong(k));
+            return item == null ? Collections.emptyList() : Collections.singletonList(item);
+        }
+        String contract = k.startsWith("0x") || k.startsWith("0X") ? k : "0x" + k;
+        List<Item> group = new ArrayList<>();
+        for (Item item : itemCache.getAll()) {
+            if (item.getContract() != null && item.getContract().equalsIgnoreCase(contract)) {
+                group.add(item);
+            }
+        }
+        group.sort(Comparator.comparing(Item::getId));
+        return group;
     }
 
     /**
@@ -420,26 +470,23 @@ public class MarketService {
     }
 
     /**
-     * collection 列表：可交易道具（box/badge）的聚合信息
+     * collection 列表：**按合约分组**，同一合约下的多个 1155 tokenId 只返回一条，
+     * 代表行取同组 id 最小的那个
      */
-    public List<CollectionVO> listCollections() {
-        List<Item> items = itemCache.getAll();
-        List<CollectionVO> result = new ArrayList<>();
-        for (Item item : items) {
-            if (item.getType() == ItemType.ERC20) {
+    public List<CollectionVO> collectionsList() {
+        Map<String, List<Item>> byContract = new LinkedHashMap<>();
+        for (Item item : itemCache.getAll()) {
+            if (item.getType() != ItemType.ERC721 && item.getType() != ItemType.ERC1155) {
                 continue;
             }
-            result.add(buildCollection(item));
+            byContract.computeIfAbsent(item.getContract().toLowerCase(), k -> new ArrayList<>()).add(item);
         }
-        return result;
-    }
-
-    public List<CollectionVO> collectionsList() {
-        List<Item> items = itemCache.getAll();
-        List<CollectionVO> result = new ArrayList<>();
-        for (Item item : items) {
-            if(item.getType() == ItemType.ERC721 || item.getType() == ItemType.ERC1155)
-                result.add(buildCollectionList(item));
+        List<CollectionVO> result = new ArrayList<>(byContract.size());
+        for (List<Item> group : byContract.values()) {
+            group.sort(Comparator.comparing(Item::getId));
+            CollectionVO vo = buildCollectionList(group.get(0));
+            vo.setItemCount(group.size());
+            result.add(vo);
         }
         return result;
     }
@@ -471,16 +518,18 @@ public class MarketService {
     /**
      * collection 详情：统一以列表返回，1155 返回单元素聚合，721 返回 NFT 挂单列表
      */
-    public List<Object> collectionDetail(Long itemId) {
-        Item item = itemCache.getById(itemId);
-        if (item == null) {
+    public List<Object> collectionDetail(String itemIdOrContract) {
+        List<Item> group = resolveCollectionItems(itemIdOrContract);
+        if (group.isEmpty()) {
             throw new BizException(ErrorCode.ITEM_NOT_FOUND);
         }
+        Item item = group.get(0);
         List<Object> list = new ArrayList<>();
         if (item.getType() != ItemType.ERC721) {
-            list.add(buildCollection(item));
+            list.add(buildCollectionGroup(group));
             return list;
         }
+        Long itemId = item.getId();
         List<Order> orders = orderMapper.selectActiveByItem(itemId);
         for (Order o : orders) {
             Nft nft = nftMapper.selectById(o.getNftId());
@@ -603,8 +652,31 @@ public class MarketService {
         return vo;
     }
 
+    /**
+     * 1155 collection 级聚合：最低价 / 在售总量 / 挂单笔数 都跨该合约下所有 tokenId 汇总
+     */
+    private CollectionVO buildCollectionGroup(List<Item> group) {
+        CollectionVO vo = buildCollectionList(group.get(0));
+        vo.setItemCount(group.size());
+        long minPrice = Long.MAX_VALUE;
+        long stock = 0;
+        int listingCount = 0;
+        for (Item item : group) {
+            for (Order o : orderMapper.selectActiveByItem(item.getId())) {
+                minPrice = Math.min(minPrice, o.getPrice());
+                stock += o.getAmount() == null ? 0L : o.getAmount();
+                listingCount++;
+            }
+        }
+        vo.setMinPrice(listingCount == 0 ? null : minPrice);
+        vo.setStock(stock);
+        vo.setListingCount(listingCount);
+        return vo;
+    }
+
     private CollectionVO buildCollectionList(Item item) {
         CollectionVO vo = new CollectionVO();
+        vo.setCollectionId(item.getContract());
         vo.setItemId(item.getId());
         vo.setName(item.getName());
         vo.setType(item.getType());
