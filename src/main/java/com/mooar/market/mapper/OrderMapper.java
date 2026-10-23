@@ -40,7 +40,7 @@ public interface OrderMapper {
      * 传多个 itemId 时一条 SQL 按 item_id 分组返回，避免 N+1
      */
     @Select("<script>SELECT item_id, COALESCE(MIN(price), 0) AS min_price, " +
-            "COALESCE(SUM(amount), 0) AS total_amount FROM `order` " +
+            "COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS listing_count FROM `order` " +
             "WHERE state = #{state} AND item_id IN " +
             "<foreach collection='itemIds' item='id' open='(' separator=',' close=')'>#{id}</foreach> " +
             "GROUP BY item_id</script>")

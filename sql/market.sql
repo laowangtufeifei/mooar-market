@@ -10,9 +10,24 @@ CREATE TABLE IF NOT EXISTS item (
   chain_scale BIGINT NOT NULL DEFAULT 1 COMMENT '1 个系统单位对应的链上最小单位数，GMT=10^16',
   image_prefix VARCHAR(128) NOT NULL DEFAULT '',
   traits_json TEXT COMMENT 'trait 槽位定义 JSON（槽位↔属性名映射 + 值编码表，per-collection）',
+  collection_id BIGINT NOT NULL DEFAULT 0 COMMENT '所属 collection.id，0=未归属',
   state INT NOT NULL DEFAULT 0 COMMENT '0=不扫块 1=扫块',
   created_at BIGINT NOT NULL DEFAULT 0,
-  updated_at BIGINT NOT NULL DEFAULT 0
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  KEY idx_collection (collection_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS collection (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  contract VARCHAR(64) NOT NULL COMMENT '链上合约地址，唯一',
+  name VARCHAR(64) NOT NULL DEFAULT '' COMMENT '系列名',
+  cover VARCHAR(256) NOT NULL DEFAULT '' COMMENT '系列封面，和 tokenId 级图片无关',
+  description TEXT COMMENT '系列描述',
+  sort INT NOT NULL DEFAULT 0 COMMENT '列表排序，小的在前',
+  state INT NOT NULL DEFAULT 0 COMMENT '0=正常 1=隐藏',
+  created_at BIGINT NOT NULL DEFAULT 0,
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uk_contract (contract)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `user` (

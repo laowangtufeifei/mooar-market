@@ -10,4 +10,6 @@ public class OrderAggRow {
     private Long itemId;
     private Long minPrice;
     private Long totalAmount;
+    /** 挂单笔数 */
+    private Integer listingCount;
 }

@@ -19,6 +19,7 @@ import com.mooar.market.entity.BalanceLog;
 import com.mooar.market.entity.Item;
 import com.mooar.market.entity.Order;
 import com.mooar.market.entity.Nft;
+import com.mooar.market.entity.NftCollection;
 import com.mooar.market.entity.Trade;
 import com.mooar.market.entity.UserAsset;
 import com.mooar.market.mapper.BalanceLogMapper;
@@ -49,6 +50,7 @@ public class MarketService {
     private static final String SORT_DESC = "desc";
 
     private final ItemCache itemCache;
+    private final CollectionCache collectionCache;
     private final OrderMapper orderMapper;
     private final TradeMapper tradeMapper;
     private final UserAssetMapper userAssetMapper;
@@ -274,7 +276,9 @@ public class MarketService {
      * 按属性筛选在售挂单，同一条件的结果走缓存
      */
     public List<OrderItemVO> searchOrders(String itemIdOrContract, TraitSearchReq req) {
-        List<Item> group = resolveCollectionItems(itemIdOrContract);
+        List<Item> group = req.getCollectionId() != null
+                ? itemsOfCollection(req.getCollectionId())
+                : resolveItems(itemIdOrContract);
         if (group.isEmpty()) {
             throw new BizException(ErrorCode.ITEM_NOT_FOUND);
         }
@@ -355,6 +359,7 @@ public class MarketService {
             vo.setImage(item.getImagePrefix());
             vo.setAmount(agg.getTotalAmount());
             vo.setPrice(agg.getMinPrice());
+            vo.setListingCount(agg.getListingCount());
             list.add(vo);
         }
         boolean desc = SORT_DESC.equalsIgnoreCase(req.getSortOrder());
@@ -376,16 +381,32 @@ public class MarketService {
     /**
      * 解析 collection：传道具 id 只返回那一个 item；传合约返回该合约下所有 item（1155 即多个 tokenId）
      */
-    private List<Item> resolveCollectionItems(String key) {
-        if (key == null || key.isBlank()) {
-            throw new BizException(ErrorCode.PARAM_ERROR);
+    /**
+     * 按 collection.id 取该系列下所有 item（1155 即多个 tokenId），按 id 升序
+     */
+    private List<Item> itemsOfCollection(Long collectionId) {
+        List<Item> group = new ArrayList<>();
+        NftCollection c = collectionCache.getById(collectionId);
+        if (c == null) {
+            return group;
         }
-        String k = key.trim();
-        if (k.matches("\\d{1,19}")) {
-            Item item = itemCache.getById(Long.parseLong(k));
-            return item == null ? Collections.emptyList() : Collections.singletonList(item);
+        for (Item item : itemCache.getAll()) {
+            boolean sameCollection = collectionId.equals(item.getCollectionId());
+            boolean sameContract = item.getContract() != null && c.getContract() != null
+                    && item.getContract().equalsIgnoreCase(c.getContract());
+            if (sameCollection || sameContract) {
+                group.add(item);
+            }
         }
-        String contract = k.startsWith("0x") || k.startsWith("0X") ? k : "0x" + k;
+        group.sort(Comparator.comparing(Item::getId));
+        return group;
+    }
+
+    /**
+     * 按合约地址取该系列下所有 item
+     */
+    private List<Item> itemsOfContract(String key) {
+        String contract = key.startsWith("0x") || key.startsWith("0X") ? key : "0x" + key;
         List<Item> group = new ArrayList<>();
         for (Item item : itemCache.getAll()) {
             if (item.getContract() != null && item.getContract().equalsIgnoreCase(contract)) {
@@ -394,6 +415,41 @@ public class MarketService {
         }
         group.sort(Comparator.comparing(Item::getId));
         return group;
+    }
+
+    /**
+     * collection 级入参：数字 = collection.id；合约地址 = 该合约对应的 collection
+     */
+    private List<Item> resolveCollectionGroup(String key) {
+        if (key == null || key.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        String k = key.trim();
+        if (k.startsWith("0x") || k.startsWith("0X") || k.length() == 40) {
+            return itemsOfContract(k);
+        }
+        if (!k.matches("\\d{1,19}")) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        return itemsOfCollection(Long.parseLong(k));
+    }
+
+    /**
+     * 老入参解析：数字 = 单个道具（某 tokenId）；合约 = 该合约下全部道具
+     */
+    private List<Item> resolveItems(String key) {
+        if (key == null || key.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        String k = key.trim();
+        if (k.startsWith("0x") || k.startsWith("0X") || k.length() == 40) {
+            return itemsOfContract(k);
+        }
+        if (!k.matches("\\d{1,19}")) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        Item item = itemCache.getById(Long.parseLong(k));
+        return item == null ? Collections.emptyList() : Collections.singletonList(item);
     }
 
     /**
@@ -474,21 +530,38 @@ public class MarketService {
      * 代表行取同组 id 最小的那个
      */
     public List<CollectionVO> collectionsList() {
-        Map<String, List<Item>> byContract = new LinkedHashMap<>();
+        List<List<Item>> groups = groupByCollection();
+        List<CollectionVO> result = new ArrayList<>(groups.size());
+        for (List<Item> group : groups) {
+            result.add(buildCollectionVO(group));
+        }
+        return result;
+    }
+
+    /**
+     * 按 collection_id 分组（还没归属的回退按合约分），组内按 item id 升序、组间按代表行 id 升序
+     */
+    private List<List<Item>> groupByCollection() {
+        Map<String, List<Item>> map = new LinkedHashMap<>();
         for (Item item : itemCache.getAll()) {
             if (item.getType() != ItemType.ERC721 && item.getType() != ItemType.ERC1155) {
                 continue;
             }
-            byContract.computeIfAbsent(item.getContract().toLowerCase(), k -> new ArrayList<>()).add(item);
+            Long cid = item.getCollectionId();
+            if (cid == null || cid <= 0) {
+                NftCollection c = collectionCache.getByContract(item.getContract());
+                cid = c == null ? 0L : c.getId();
+            }
+            String key = cid > 0 ? "c:" + cid
+                    : "k:" + (item.getContract() == null ? "" : item.getContract().toLowerCase());
+            map.computeIfAbsent(key, k -> new ArrayList<>()).add(item);
         }
-        List<CollectionVO> result = new ArrayList<>(byContract.size());
-        for (List<Item> group : byContract.values()) {
+        List<List<Item>> groups = new ArrayList<>(map.values());
+        for (List<Item> group : groups) {
             group.sort(Comparator.comparing(Item::getId));
-            CollectionVO vo = buildCollectionList(group.get(0));
-            vo.setItemCount(group.size());
-            result.add(vo);
         }
-        return result;
+        groups.sort(Comparator.comparing(g -> g.get(0).getId()));
+        return groups;
     }
 
     /**
@@ -518,8 +591,8 @@ public class MarketService {
     /**
      * collection 详情：统一以列表返回，1155 返回单元素聚合，721 返回 NFT 挂单列表
      */
-    public List<Object> collectionDetail(String itemIdOrContract) {
-        List<Item> group = resolveCollectionItems(itemIdOrContract);
+    public List<Object> collectionDetail(String idOrContract) {
+        List<Item> group = resolveCollectionGroup(idOrContract);
         if (group.isEmpty()) {
             throw new BizException(ErrorCode.ITEM_NOT_FOUND);
         }
@@ -656,8 +729,7 @@ public class MarketService {
      * 1155 collection 级聚合：最低价 / 在售总量 / 挂单笔数 都跨该合约下所有 tokenId 汇总
      */
     private CollectionVO buildCollectionGroup(List<Item> group) {
-        CollectionVO vo = buildCollectionList(group.get(0));
-        vo.setItemCount(group.size());
+        CollectionVO vo = buildCollectionVO(group);
         long minPrice = Long.MAX_VALUE;
         long stock = 0;
         int listingCount = 0;
@@ -674,14 +746,22 @@ public class MarketService {
         return vo;
     }
 
-    private CollectionVO buildCollectionList(Item item) {
+    /**
+     * collection 级 VO：名称/封面取 collection 表，取不到再退回代表行的值
+     */
+    private CollectionVO buildCollectionVO(List<Item> group) {
+        Item rep = group.get(0);
+        NftCollection c = rep.getCollectionId() != null && rep.getCollectionId() > 0
+                ? collectionCache.getById(rep.getCollectionId())
+                : collectionCache.getByContract(rep.getContract());
         CollectionVO vo = new CollectionVO();
-        vo.setCollectionId(item.getContract());
-        vo.setItemId(item.getId());
-        vo.setName(item.getName());
-        vo.setType(item.getType());
-        vo.setImage(item.getImagePrefix());
-        vo.setTraits(item.getTraitsJson());
+        vo.setCollectionId(c == null ? rep.getCollectionId() : c.getId());
+        vo.setItemId(rep.getId());
+        vo.setType(rep.getType());
+        vo.setName(c != null && c.getName() != null && !c.getName().isBlank() ? c.getName() : rep.getName());
+        vo.setImage(c != null && c.getCover() != null && !c.getCover().isBlank() ? c.getCover() : rep.getImagePrefix());
+        vo.setTraits(rep.getTraitsJson());
+        vo.setItemCount(group.size());
         return vo;
     }
 

@@ -19,4 +19,6 @@ public class OrderItemVO {
     /** 挂单数量，721 恒为 1 */
     private Long amount;
     private Long price;
+    /** 挂单笔数（仅 1155 聚合行有值：该 tokenId 下有多少笔在售订单） */
+    private Integer listingCount;
 }

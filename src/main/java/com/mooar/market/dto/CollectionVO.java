@@ -4,8 +4,8 @@ import lombok.Data;
 
 @Data
 public class CollectionVO {
-    /** collection 标识：合约地址。1155 同一合约下多个 tokenId 归为同一个 collection */
-    private String collectionId;
+    /** collection.id（collection 表主键）。1155 同一合约下多个 tokenId 归为同一个 collection */
+    private Long collectionId;
     /** 代表 item（同合约下 id 最小的那行），兼容按 itemId 的老调用 */
     private Long itemId;
     private String name;
