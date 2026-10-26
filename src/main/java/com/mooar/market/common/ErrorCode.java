@@ -13,6 +13,8 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "unauthorized"),
     FORBIDDEN(403, "forbidden"),
     NOT_FOUND(404, "not found"),
+    METHOD_NOT_ALLOWED(405, "method not allowed"),
+    UNSUPPORTED_MEDIA_TYPE(415, "unsupported media type"),
     INTERNAL_ERROR(500, "internal error"),
 
     LOGIN_TOKEN_ERROR(1001, "invalid login credential"),
